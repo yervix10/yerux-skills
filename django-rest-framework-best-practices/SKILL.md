@@ -1,0 +1,89 @@
+---
+name: django-rest-framework-best-practices
+description: Django and Django REST Framework optimization guidelines. This skill defines the architectural and performance standards for the back-end, focusing on ORM efficiency, serialization strategies, and API security
+license: MIT
+metadata:
+  author: gianllopez
+  version: 1.6.0
+---
+
+# Django REST Framework Best Practices
+
+Comprehensive guide for _Django_ and _Django REST Framework_ development. Contains rules prioritized by impact on database performance, response times, and security.
+
+## When to Apply
+
+Reference these guidelines when:
+
+- Designing or modifying _Django_ models and database schemas (_PostgreSQL_)
+- Implementing _Django REST Framework_ serializers and data validation logic
+- Developing _API_ views using _Django REST Framework ViewSets_ or _Generic Views_
+- Optimizing database interactions using the _Django_ ORM (e.g., `select_related`, `prefetch_related`)
+- Managing authentication flows, custom permissions, and throttling policies
+- Writing custom _Django_ management commands for administrative tasks
+- Implementing middleware for global request or response processing
+- Handling _Django_ signals and receivers for decoupled event logic
+- Structuring new applications and defining dependencies within the _Django_ project
+- Customizing the _Django_ Admin interface for internal data management
+
+## Rule Categories by Priority
+
+| Priority | Category                 | Peak impact | Prefix  |
+| :------- | :----------------------- | :---------- | :------ |
+| 1        | Architecture & Structure | HIGH        | `arch-` |
+| 2        | Configuration & DevOps   | HIGH        | `conf-` |
+| 3        | ORM & Database           | HIGH        | `arch-` |
+| 4        | API & Serialization      | HIGH        | `arch-` |
+| 5        | Testing & Verification   | HIGH        | `test-` |
+| 6        | Documentation & Style    | MEDIUM      | `doc-`  |
+
+Priority orders where to look first; peak impact is the strongest rule in the section, matching the table of contents in `AGENTS.md`. They disagree on purpose — a section can hold one blocking rule and several that only ever produce suggestions.
+
+## Quick Reference
+
+### 1. Architecture & Structure (HIGH)
+
+- `arch-app-structure` - Enforces `apps/` directory and package-based models/views
+
+### 2. Configuration & DevOps (HIGH)
+
+- `conf-settings-structure` - Modular settings (base/development/production) and secure secrets
+- `conf-deployment-topology` - Layered _Compose_ overlays, _Caddy_ reverse proxy, non-root image with a release entrypoint, _gunicorn_, and _systemd_ timers
+- `conf-env-dependencies` - Segregated `.venv` and split requirement files
+
+### 3. ORM & Database (HIGH)
+
+- `arch-orm-model-structure` - One model per file, strict meta options, and typing
+
+### 4. API & Serialization (HIGH)
+
+- `arch-api-serializer-definition` - Action-based naming, explicit field declaration ordered by model and one field per line, and representation delegation extracted at the third serializer that needs it
+- `arch-view-definition` - Generic views usage, strict _APIView_ typing, and explicit security declaration
+- `arch-url-registration` - Module-level view imports, domain grouping, create/list/detail ordering, and exploded `path()` calls
+
+### 5. Testing & Verification (HIGH)
+
+- `test-scoped-verification` - Ties the verification method to the change surface (model, serializer, view, its security contract, or a signal/receiver) and forbids writing automated test files unless explicitly requested
+
+### 6. Documentation & Style (MEDIUM)
+
+- `doc-comment-standards` - English-only comments and docstrings, limited to what the code cannot say on its own, with a standard structure and placement
+
+## How to Use
+
+Read individual rule files for detailed explanations and code examples:
+
+```
+./rules/*.md
+```
+
+Each rule file contains:
+
+- Brief explanation of why it matters
+- Incorrect code example with explanation
+- Correct code example with explanation
+- Additional context and references
+
+## Full Compiled Document
+
+For the complete guide with all rules expanded: `AGENTS.md`

@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "author": "Gian López",
+  "date": "September 2026",
+  "abstract": "Standards for the two things a React web project adds on top of plain HTML and TailwindCSS: a forms library — react-hook-form and the shadcn/ui Form components — that owns every field's value and its validation message, and the generator that writes shadcn/ui components into the project under a structure it has to be told about, or it undoes that structure the next time it runs. Framework-agnostic semantic HTML, TailwindCSS v4 theming, layout stability, and CSS footprint are covered in html-best-practices, which a web project loads alongside this one. Everything independent of the renderer — effects, state, the query layer, component composition and typing — lives in react-core-best-practices, also loaded alongside this one. Accessibility auditing is excluded by design",
+  "references": [
+    "https://reactrouter.com/start/framework/route-module",
+    "https://react-hook-form.com/docs/useform",
+    "https://ui.shadcn.com/docs/components/form",
+    "https://ui.shadcn.com/docs/components-json"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "version": "1.1.0",
+  "author": "Yerson Vizcaino",
+  "date": "October 2026",
+  "abstract": "An executable skill for generating color palettes from hex codes and delivering them as a variables file ready to import into Figma. For each color it builds a scale of 11 shades (50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950) in the Tailwind style, generated with the same algorithm as hue: the closest Tailwind color family by CIEDE2000, re-tinted so one shade is the input color, producing identical hexadecimal values. The original color is never altered: it lands exactly at the shade whose lightness fits best and is also saved as a \"default\" entry at the start of its group. One or several colors can be passed in a single request, optionally named (Primary, Secondary, Tertiary by default). The output is a Design Tokens (DTCG) JSON file named Value.json, with one group per color and a separate \"Tailwind\" group holding White and Black, so Figma shows the file name as the values column when importing. Alongside the file, every reply includes the RGB, CMYK and HSL values of each original color, and the same values can be requested on their own. Plain text, CSS, Tailwind and simple JSON formats are available on request. Behavior is governed by a set of user directives: no names are ever asked for, the file name is fixed unless the user requests another, and the deliverable is always the file plus the color values together.",
+  "references": [
+    "https://help.figma.com/hc/en-us/articles/15343816063383-Modes-for-variables",
+    "https://www.designtokens.org/tr/2025.10/format/"
+  ]
+}
