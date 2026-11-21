@@ -92,7 +92,7 @@ function Read-State($n) { $h = @{}; $f = Join-Path $B "runs\$n.state"
 # Get-Usage: model / project / branch / context % / 5h % / week % of an agent. Codex: from its latest session file (the data its UI shows).
 # Claude: from its worker's live log. '' = unknown.
 function Get-Usage($n) {
-  $o = @{ model = ''; proj = ''; br = ''; ctx = ''; h5 = ''; wk = ''; age = '' }; $dir = Lookup-NameDir $n; if (-not $dir) { return $o }
+  $o = @{ eff = ''; model = ''; proj = ''; br = ''; ctx = ''; h5 = ''; wk = ''; age = '' }; $dir = Lookup-NameDir $n; if (-not $dir) { return $o }
   $leaf = Split-Path $dir -Leaf; $now = Get-Epoch; $cwd = ''
   if ($leaf -like '.codex*') {
     $f = Get-ChildItem (Join-Path $dir 'sessions') -Recurse -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -100,7 +100,7 @@ function Get-Usage($n) {
       $o.age = $now - [DateTimeOffset]::new($f.LastWriteTimeUtc).ToUnixTimeSeconds()
       foreach ($l in @(Get-Content -LiteralPath $f.FullName -Tail 400 -Encoding UTF8 -ErrorAction SilentlyContinue)) {
         try { $e = $l | ConvertFrom-Json } catch { continue }
-        if ($e.type -eq 'turn_context') { $o.model = [string]$e.payload.model; $cwd = [string]$e.payload.cwd }
+        if ($e.type -eq 'turn_context') { $o.model = [string]$e.payload.model; $cwd = [string]$e.payload.cwd; if ($e.payload.effort) { $o.eff = [string]$e.payload.effort } }
         elseif ($e.type -eq 'event_msg' -and $e.payload.type -eq 'token_count' -and $e.payload.rate_limits) {
           $i = $e.payload.info
           if ($i -and $i.model_context_window) { $o.ctx = [int][Math]::Floor($i.last_token_usage.total_tokens * 100 / $i.model_context_window) }
@@ -187,24 +187,31 @@ function Invoke-Agent($a) {
         foreach ($n in (Get-Names)) {
           $u = Get-Usage $n; $d = { param($x) if ($x -ne '') { $x } else { '-' } }; $sep = ' | '
           Write-Host ("{0,-9} " -f $n) -NoNewline -ForegroundColor White
-          Write-Host ("$(& $d $u.model)$sep$(& $d $u.proj)$sep$(& $d $u.br)$sep") -NoNewline; Write-Host 'ctx ' -NoNewline; Write-Pct $u.ctx
+          Write-Host ("$(& $d $u.model)$(if ($u.eff) { " $([char]0xB7) $($u.eff)" })$sep$(& $d $u.proj)$sep$(& $d $u.br)$sep") -NoNewline; Write-Host 'ctx ' -NoNewline; Write-Pct $u.ctx
           Write-Host '  5h ' -NoNewline; Write-Pct $u.h5; Write-Host '  sem ' -NoNewline; Write-Pct $u.wk
           if ($u.age -ne '' -and [int64]$u.age -gt 600) { Write-Host " (data $([int]([int64]$u.age / 60)) min old)" -NoNewline -ForegroundColor DarkGray }
           Write-Host ''; $st = $lines | Where-Object { $_ -like "${n}:*" } | Select-Object -First 1
           Write-Host ("          " + ([string]$st -replace "^${n}:\s*", '')) -ForegroundColor DarkGray }
         if ($once) { break }; Start-Sleep -Seconds 2 } }
-    'model' {
-      $n = $a[1]; $m = $a[2]; $mf = Join-Path $B "models\$n"
-      if (-not $n) { foreach ($w in (Get-Names)) { $v = Join-Path $B "models\$w"; Write-Output "${w}: $(if (Test-Path $v) { (Read-Text $v).Trim() } else { 'default' })" }; return }
-      if ($me -ne (Read-Text (Join-Path $B 'admin')).Trim()) { Write-Error "only the admin can change a worker's model (you are $me)"; return }
-      if (-not (@(Get-Names) -contains $n)) { Write-Error "unknown worker: $n"; return }
-      if (-not $m) { Write-Error 'usage: agent model <worker> <model|default>'; return }
-      if ($m -eq 'default') { Remove-Item $mf -Force -ErrorAction SilentlyContinue; Write-Output "${n}: model back to its default (applies from its next order)"; return }
-      if ($m -notmatch '^[A-Za-z0-9._:/\[\]-]+$') { Write-Error 'invalid model name'; return }
-      Ensure-Dir (Join-Path $B 'models'); Write-Text $mf $m; Write-Output "${n}: model set to $m (applies from its next order)" }
+    { $_ -in 'model', 'effort' } {
+      $what = $a[0]; $n = $a[1]; $v = $a[2]; $dirName = if ($what -eq 'model') { 'models' } else { 'effort' }
+      if (-not $n) { foreach ($w in (Get-Names)) { $mf = Join-Path $B "models\$w"; $ef = Join-Path $B "effort\$w"
+          Write-Output "${w}: model $(if (Test-Path $mf) { (Read-Text $mf).Trim() } else { 'default' }), effort $(if (Test-Path $ef) { (Read-Text $ef).Trim() } else { 'default' })" }; return }
+      if ($me -ne (Read-Text (Join-Path $B 'admin')).Trim()) { Write-Error "only the admin can change a worker's $what (you are $me)"; return }
+      $wdir = Lookup-NameDir $n; if (-not $wdir) { Write-Error "unknown worker: $n"; return }
+      if (-not $v) { Write-Error "usage: agent $what <worker> <$(if ($what -eq 'effort') { 'level' } else { 'model' })|default>"; return }
+      function Set-One($file, $val, $label) {
+        if ($val -eq 'default') { Remove-Item $file -Force -ErrorAction SilentlyContinue; Write-Output "${n}: $label back to its default (applies from its next order)"; return $true }
+        if ($label -eq 'effort') {
+          $levels = if ((Split-Path $wdir -Leaf) -like '.claude*') { @('low', 'medium', 'high', 'xhigh', 'max') } else { @('none', 'minimal', 'low', 'medium', 'high', 'xhigh') }
+          if ($levels -notcontains $val) { Write-Error "invalid effort: use one of $($levels -join ' '), or default"; return $false } }
+        elseif ($val -notmatch '^[A-Za-z0-9._:/\[\]-]+$') { Write-Error 'invalid model name'; return $false }
+        Ensure-Dir (Split-Path $file -Parent); Write-Text $file $val; Write-Output "${n}: $label set to $val (applies from its next order)"; return $true }
+      if ($what -eq 'model') { if (Set-One (Join-Path $B "models\$n") $v 'model') { if ($a[3]) { [void](Set-One (Join-Path $B "effort\$n") $a[3] 'effort') } } }
+      else { [void](Set-One (Join-Path $B "effort\$n") $v 'effort') } }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
-      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model [worker model|default] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
+      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
     default  { Send-Msg $a[0] (Join-Rest $a 1) } } }
 
 # ---- runner: headless worker with memory (resumes its conversation per working directory) ----
@@ -324,18 +331,19 @@ function Invoke-Runner($name) {
     Log "order from $from in ${cwd}: $($body.Substring(0, [Math]::Min(120, $body.Length)) -replace '\s+', ' ')"
     $st.status = 'working'; $st.since = (Get-Epoch); $st.order = ($body.Substring(0, [Math]::Min(100, $body.Length)) -replace '\s+', ' '); Write-State
     $mfile = Join-Path $B "models\$name"; $mdl = if (Test-Path $mfile) { (Read-Text $mfile).Trim() } else { '' }   # set by the admin with `agent model`
+    $efile = Join-Path $B "effort\$name"; $effort = if (Test-Path $efile) { (Read-Text $efile).Trim() } else { '' }   # `agent effort`
     $envs = @{ BRIDGE_NO_HOOK = '1'; BRIDGE_NAME = $name }
     $newId = $null; $outFile = $null
     if ($kind -eq 'claude') {
       $envs['CLAUDE_CONFIG_DIR'] = $dir
       $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
-      $cargs = @('-p', '--output-format', 'stream-json', '--verbose'); if ($mdl) { $cargs += @('--model', $mdl) }; if ($safe) { $cargs += @('--permission-mode', 'acceptEdits') } elseif ($bypass) { $cargs += '--dangerously-skip-permissions' }
+      $cargs = @('-p', '--output-format', 'stream-json', '--verbose'); if ($mdl) { $cargs += @('--model', $mdl) }; if ($effort) { $cargs += @('--effort', $effort) }; if ($safe) { $cargs += @('--permission-mode', 'acceptEdits') } elseif ($bypass) { $cargs += '--dangerously-skip-permissions' }
       if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) } else { $newId = [guid]::NewGuid().ToString(); $cargs += @('--session-id', $newId) }
     } else {
       $envs['CODEX_HOME'] = $dir; $outFile = [IO.Path]::GetTempFileName()
       $perm = if ($bypass) { @('--dangerously-bypass-approvals-and-sandbox') } else { @('-s', 'workspace-write') }
-      if (Test-Path $sf) { $cargs = @('exec', 'resume') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $(if ($bypass) { $perm } else { @('-c', 'sandbox_mode="workspace-write"') }) + @('--skip-git-repo-check', '-o', $outFile, (Read-Text $sf).Trim(), '-') }
-      else { $cargs = @('exec', '--json', '--skip-git-repo-check') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $perm + @('-o', $outFile, '-') } }
+      if (Test-Path $sf) { $cargs = @('exec', 'resume') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $(if ($effort) { @('-c', "model_reasoning_effort=`"$effort`"") } else { @() }) + $(if ($bypass) { $perm } else { @('-c', 'sandbox_mode="workspace-write"') }) + @('--skip-git-repo-check', '-o', $outFile, (Read-Text $sf).Trim(), '-') }
+      else { $cargs = @('exec', '--json', '--skip-git-repo-check') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $(if ($effort) { @('-c', "model_reasoning_effort=`"$effort`"") } else { @() }) + $perm + @('-o', $outFile, '-') } }
     $job = Start-Job -ScriptBlock {
       param($cwd, $envs, $exe, $cargs, $prompt, $live)
       Set-Location $cwd; foreach ($k in $envs.Keys) { Set-Item "env:$k" $envs[$k] }

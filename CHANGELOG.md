@@ -13,6 +13,11 @@
   `-m` for Codex). Only the admin may do it; `agent model` lists them and the dashboard shows the one set.
 - Ported to Windows (except the status line wrapper).
 
+## 1.4.1
+- `agent effort <worker> <level|default>` (and `agent model <worker> <model> [effort]`): the admin sets each worker's reasoning effort too.
+  Claude gets `--effort` (low medium high xhigh max), Codex `-c model_reasoning_effort` (none minimal low medium high xhigh); validated
+  per provider. The dashboard shows the effort in use next to the model.
+
 ## 1.3.1
 - Dashboard: Claude agents now load. Interactive sessions are read from the status line cache when present, workers from their live
   log (now with context % from the usage and the model's window), and `agent refresh` fills the rest with one tiny request per account.

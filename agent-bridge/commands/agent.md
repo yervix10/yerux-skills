@@ -1,6 +1,6 @@
 ---
 description: Talk to a specific session (ping, order, all, listen, up/down/status)
-argument-hint: ping <target> | <target> <message> | all <message> | listen | up|down <name|all> | status | dashboard --once | model <worker> <model|default> | logs <name> | reset <name> | list | inbox
+argument-hint: ping <target> | <target> <message> | all <message> | listen | up|down <name|all> | status | dashboard --once | model <worker> <model|default> [effort] | effort <worker> <level|default> | logs <name> | reset <name> | list | inbox
 allowed-tools: Bash(~/.claude-bridge/bin/agent:*)
 ---
 Use the `agent-bridge` skill. Arguments: `$ARGUMENTS`

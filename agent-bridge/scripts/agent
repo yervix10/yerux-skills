@@ -57,28 +57,33 @@ case "$1" in
         if [ $once = 0 ]; then printf '\033[H\033[2J'; printf '\033[1magent-bridge\033[0m  %s   \033[2m(Ctrl+C to exit)\033[0m\n\n' "$(date +%T)"; else echo "agent-bridge  $(date +%T)"; echo; fi
         st="$("$0" status)"
         for n in $(awk -F= '{print $2}' "$R/names.conf"); do
-          IFS=$'\t' read -r model proj br ctx h5 wk age < <("$D/bridge-usage" "$n" 2>/dev/null)
-          for v in model proj br ctx h5 wk age; do [ "${!v}" = - ] && printf -v "$v" ''; done
-          want="$(cat "$R/models/$n" 2>/dev/null)"
+          IFS=$'\t' read -r model proj br ctx h5 wk age eff < <("$D/bridge-usage" "$n" 2>/dev/null)
+          for v in model proj br ctx h5 wk age eff; do [ "${!v}" = - ] && printf -v "$v" ''; done
+          want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
           state="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"
-          col 1; printf '%-9s' "$n"; col 0; printf ' %s' "${model:-–}"; [ -n "$want" ] && printf ' (set: %s)' "$want"
+          col 1; printf '%-9s' "$n"; col 0; printf ' %s' "${model:-–}"; [ -n "$eff" ] && printf ' · %s' "$eff"; { [ -n "$want" ] || [ -n "$weff" ]; } && printf ' (set: %s)' "$(printf '%s %s' "${want:-}" "${weff:+effort $weff}" | sed 's/^ //; s/ $//')"
           printf ' | %s | %s | ctx ' "${proj:-–}" "${br:-–}"; pct "$ctx"; printf ' | 5h '; pct "$h5"; printf ' | sem '; pct "$wk"
           [ -n "$age" ] && [ "$age" -gt 600 ] && { col 2; printf ' (data %s min old)' $((age / 60)); col 0; }
           printf '\n          '; col 2; printf '%s' "$state"; col 0; printf '\n'; done
         [ $once = 1 ] && break; sleep 2; done;;
-  model) shift; n="$1"; m="$2"
-      if [ -z "$n" ]; then for w in $(awk -F= '{print $2}' "$R/names.conf"); do echo "$w: $(cat "$R/models/$w" 2>/dev/null || true)" | sed 's/: $/: default/'; done; exit 0; fi
-      [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] || { echo "only the admin can change a worker's model (you are $me)" >&2; exit 1; }
-      awk -F= -v n="$n" '$2==n{f=1} END{exit !f}' "$R/names.conf" || { echo "unknown worker: $n" >&2; exit 1; }
-      [ -n "$m" ] || { echo "usage: agent model <worker> <model|default>   e.g. agent model agent-2 claude-opus-5-5" >&2; exit 1; }
-      if [ "$m" = default ]; then rm -f "$R/models/$n"; echo "$n: model back to its default (applies from its next order)"
-      else [[ "$m" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "invalid model name" >&2; exit 1; }
-        mkdir -p "$R/models"; printf '%s' "$m" > "$R/models/$n"; echo "$n: model set to $m (applies from its next order)"; fi;;
+  model|effort) cmd="$1"; shift; n="$1"; v="$2"; f="$R/models"; [ "$cmd" = effort ] && f="$R/effort"
+      if [ -z "$n" ]; then for w in $(awk -F= '{print $2}' "$R/names.conf"); do echo "$w: model $(cat "$R/models/$w" 2>/dev/null || echo default), effort $(cat "$R/effort/$w" 2>/dev/null || echo default)"; done; exit 0; fi
+      [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] || { echo "only the admin can change a worker's $cmd (you are $me)" >&2; exit 1; }
+      dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$R/names.conf")"; [ -n "$dir" ] || { echo "unknown worker: $n" >&2; exit 1; }
+      [ -n "$v" ] || { echo "usage: agent $cmd <worker> <$([ "$cmd" = effort ] && echo level || echo model)|default>   e.g. agent model agent-2 claude-opus-5-5 high" >&2; exit 1; }
+      setone() { local file="$1" val="$2" what="$3"
+        if [ "$val" = default ]; then rm -f "$file"; echo "$n: $what back to its default (applies from its next order)"; return 0; fi
+        if [ "$what" = effort ]; then case "$(basename "$dir")" in .claude*) levels="low medium high xhigh max";; *) levels="none minimal low medium high xhigh";; esac
+          case " $levels " in *" $val "*) ;; *) echo "invalid effort for $(basename "$dir" | sed 's/^\.\(claude\|codex\).*/\1/'): use one of $levels, or default" >&2; return 1;; esac
+        else [[ "$val" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "invalid model name" >&2; return 1; }; fi
+        mkdir -p "$(dirname "$file")"; printf '%s' "$val" > "$file"; echo "$n: $what set to $val (applies from its next order)"; }
+      if [ "$cmd" = model ]; then setone "$R/models/$n" "$v" model || exit 1; [ -n "$3" ] && { setone "$R/effort/$n" "$3" effort || exit 1; }
+      else setone "$R/effort/$n" "$v" effort || exit 1; fi;;
   logs) [ -f "$R/runs/$2.state" ] && sed -n 's/^status=/status: /p;s/^order=/order: /p;s/^activity=/doing: /p;s/^last_kind=/last result: /p' "$R/runs/$2.state"; tail -n "${3:-30}" "$R/logs/$2.log";;
   reset) rm -rf "$R/sessions/$2" && echo "memory of $2 cleared";;
   list) "$D/bridge-send" --list ;;
   inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
   listen) exec "$D/bridge-wait" ;;
-  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model [worker model|default] | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
   *) to="$1"; shift; "$D/bridge-send" "$to" "$@" ;;
 esac

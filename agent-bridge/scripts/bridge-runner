@@ -109,6 +109,8 @@ $body"
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
   if [ -n "$mdl" ]; then if [ "$kind" = claude ]; then MODEL_ARGS=(--model "$mdl"); else MODEL_ARGS=(-m "$mdl"); fi; fi
+  eff="$(cat "$B/effort/$name" 2>/dev/null)"   # reasoning effort, also set by the admin (`agent effort`)
+  if [ -n "$eff" ]; then if [ "$kind" = claude ]; then MODEL_ARGS+=(--effort "$eff"); else MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\""); fi; fi
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
   tmp="$(mktemp)"; rc=0
   if [ "$kind" = claude ]; then

@@ -138,7 +138,19 @@ echo "$*" > "$FAKEMODE.args"; printf '%s\n' '{"type":"result","is_error":false,"
 EOF
 rm -f "$T/b/inbox/adm"/*; start; send "use the model"; wait_reply 1; stop
 check "worker runs with --model" "$(grep -o -- '--model [^ ]*' "$T/mode.args")" "--model claude-opus-test"
-BRIDGE_NAME=adm "$S/agent" model w1 default >/dev/null
+check "effort validated per provider (claude has no 'minimal')" "$(BRIDGE_NAME=adm "$S/agent" effort w1 minimal 2>&1 | head -1 | cut -c1-25)" "invalid effort for claude"
+check "model + effort in one command" "$(BRIDGE_NAME=adm "$S/agent" model w1 claude-opus-test high | tail -1)" "w1: effort set to high (applies from its next order)"
+rm -f "$T/b/inbox/adm"/*; start; send "use the effort"; wait_reply 1; stop
+check "claude worker runs with --effort" "$(grep -o -- '--effort [^ ]*' "$T/mode.args")" "--effort high"
+cat > "$T/bin/codex" <<'EOF'
+#!/bin/bash
+echo "$*" > "$FAKEMODE.args"; out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done; [ -n "$out" ] && echo done > "$out"; echo '{"type":"turn.completed"}'
+EOF
+BRIDGE_NAME=adm "$S/agent" effort w2 xhigh >/dev/null; rm -f "$T/b/inbox/adm"/*; start w2
+printf 'From: adm\nTo: w2\nDate: x\nCwd: /tmp\n\nhi\n' > "$T/b/inbox/w2/$(date +%s%N)-de-adm.msg"; wait_reply 1; stop
+check "codex worker gets the reasoning effort" "$(grep -c 'model_reasoning_effort="xhigh"' "$T/mode.args")" "1"
+BRIDGE_NAME=adm "$S/agent" effort w2 default >/dev/null
+BRIDGE_NAME=adm "$S/agent" model w1 default >/dev/null; BRIDGE_NAME=adm "$S/agent" effort w1 default >/dev/null
 check "default removes it" "$([ -f "$T/b/models/w1" ] && echo present || echo gone)" "gone"
 check "dashboard --once prints plain text" "$("$S/agent" dashboard --once | grep -c $'\033')" "0"
 check "dashboard --once lists every agent" "$("$S/agent" dashboard --once | grep -c '^w[12] ')" "2"
