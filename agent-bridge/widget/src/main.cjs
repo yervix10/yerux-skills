@@ -3,7 +3,7 @@
 const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { fetchDashboard } = require('./poll.cjs');
 const { normalizeGroupOpen } = require('./metrics.js');
@@ -153,6 +153,15 @@ function updateTray() {
   ]));
 }
 
+function feedScript() {
+  const candidates = [
+    process.env.BRIDGE_WIDGET_CMD && path.join(path.dirname(process.env.BRIDGE_WIDGET_CMD), 'bridge-feed'),
+    path.join(require('node:os').homedir(), '.claude-bridge', 'bin', 'bridge-feed'),
+    path.join(root, '..', 'scripts', 'bridge-feed'),
+  ].filter(Boolean);
+  return candidates.find((file) => { try { fs.accessSync(file, fs.constants.X_OK); return true; } catch { return false; } });
+}
+
 async function poll(force = false) {
   clearTimeout(pollingTimer);
   if (quitting || !window || window.isDestroyed() || (!force && (!window.isVisible() || window.isMinimized())) || currentPoll) return;
@@ -263,8 +272,15 @@ async function createWidget() {
   });
   ipcMain.handle('feed:read', (event, name) => {
     if (!fromWidget(event) || typeof name !== 'string' || !snapshot.data?.agents?.some(a => a.name === name)) return null;
-    try { return JSON.parse(execFileSync(path.join(root, 'scripts', 'bridge-feed'), [name, '--json', '--limit', '60'], { encoding: 'utf8', timeout: 5000 })); }
-    catch { return { name, state: { status: 'unavailable' }, events: [] }; }
+    const unavailable = { name, state: { status: 'unavailable' }, events: [] };
+    const script = feedScript();
+    if (!script) return unavailable;
+    return new Promise((resolve) => {
+      execFile(script, [name, '--json', '--limit', '60'], { encoding: 'utf8', timeout: 8000, maxBuffer: 4 * 1024 * 1024, env: process.env }, (error, stdout) => {
+        if (error) { console.error('feed falló:', error.message); return resolve(unavailable); }
+        try { resolve(JSON.parse(stdout)); } catch { resolve(unavailable); }
+      });
+    });
   });
   ipcMain.on('dashboard:visible', (event, visible) => {
     if (!fromWidget(event) || typeof visible !== 'boolean') return;
