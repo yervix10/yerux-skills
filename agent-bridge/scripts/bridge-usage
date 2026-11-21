@@ -36,22 +36,17 @@ case "$(basename "$dir")" in
     fi
     if [ -s "$u" ] && { [ ! -s "$f" ] || [ "$u" -nt "$f" ]; }; then
       at="$(stat -c %Y "$u" 2>/dev/null || stat -f %m "$u" 2>/dev/null)"
-      model="$(jq -r '.model.display_name // empty' "$u" 2>/dev/null)"; eff="$(jq -r '.effort.level // empty' "$u" 2>/dev/null)"; cwd="$(jq -r '.workspace.current_dir // .cwd // empty' "$u" 2>/dev/null)"
-      ctx="$(jq -r '.context_window.used_percentage // empty|floor' "$u" 2>/dev/null)"
-      h5="$(jq -r '.rate_limits.five_hour.used_percentage // empty|floor' "$u" 2>/dev/null)"; wk="$(jq -r '.rate_limits.seven_day.used_percentage // empty|floor' "$u" 2>/dev/null)"
-      h5r="$(jq -r '.rate_limits.five_hour.resets_at // empty' "$u" 2>/dev/null)"; wkr="$(jq -r '.rate_limits.seven_day.resets_at // empty' "$u" 2>/dev/null)"
+      IFS=$'\t' read -r model eff cwd ctx h5 wk h5r wkr < <(jq -r 'def num: if . == null then "-" else floor|tostring end; def str: if . == null then "-" else tostring end; [(.model.display_name|str),(.effort.level|str),(.workspace.current_dir // .cwd|str),(.context_window.used_percentage|num),(.rate_limits.five_hour.used_percentage|num),(.rate_limits.seven_day.used_percentage|num),(.rate_limits.five_hour.resets_at|str),(.rate_limits.seven_day.resets_at|str)]|@tsv' "$u" 2>/dev/null)
     elif [ -s "$f" ]; then
       at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
-      model="$(jq -r 'select(.type=="system" and .subtype=="init")|.model' "$f" 2>/dev/null | tail -1)"
-      cwd="$(jq -r 'select(.type=="system" and .subtype=="init")|.cwd' "$f" 2>/dev/null | tail -1)"
-      row="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|[((.unifiedWindows.five_hour.utilization // empty)*100|floor), ((.unifiedWindows.seven_day.utilization // empty)*100|floor), (.unifiedWindows.five_hour.resetsAt // ""), (.unifiedWindows.seven_day.resetsAt // "")]|@tsv' "$f" 2>/dev/null | tail -1)"
-      h5="$(printf '%s' "$row" | cut -f1)"; wk="$(printf '%s' "$row" | cut -f2)"; h5r="$(printf '%s' "$row" | cut -f3)"; wkr="$(printf '%s' "$row" | cut -f4)"
-      # context: tokens of the last assistant message over the model's window (reported in the result event)
-      used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0)+(.cache_creation_input_tokens // 0))' "$f" 2>/dev/null | tail -1)"
-      win="$(jq -r 'select(.type=="result")|.modelUsage|to_entries[0].value.contextWindow // empty' "$f" 2>/dev/null | tail -1)"
+      # Fold the live transcript in one jq process; separate jq|tail|cut pipelines repeatedly parsed multi-megabyte logs.
+      row="$(jq -sr '[.[]|select(.type=="system" and .subtype=="init")] as $init | [.[]|select(.type=="rate_limit_event")] as $rates | [.[]|select(.type=="assistant" and .message.usage)] as $assistants | [.[]|select(.type=="result")] as $results | ($rates[-1].rate_limit_info.unifiedWindows // {}) as $windows | ($assistants[-1].message.usage // {}) as $usage | (($results[-1].modelUsage // {})|to_entries[0].value.contextWindow // "-") as $window | [($init[-1].model // "-"),($init[-1].cwd // "-"),(if $windows.five_hour.utilization == null then "-" else (($windows.five_hour.utilization*100)|floor|tostring) end),(if $windows.seven_day.utilization == null then "-" else (($windows.seven_day.utilization*100)|floor|tostring) end),($windows.five_hour.resetsAt // "-"),($windows.seven_day.resetsAt // "-"),((($usage.input_tokens // 0)+($usage.cache_read_input_tokens // 0)+($usage.cache_creation_input_tokens // 0))|tostring),($window|tostring)]|@tsv' "$f" 2>/dev/null)"
+      IFS=$'\t' read -r model cwd h5 wk h5r wkr used win <<< "$row"
+      for v in model cwd h5 wk h5r wkr used win; do [ "${!v}" = - ] && printf -v "$v" ''; done
       [ -n "$used" ] && [ -n "$win" ] && ctx=$((used * 100 / win))
     fi;;
 esac
+for v in model cwd ctx h5 wk at eff h5r wkr mo mor; do [ "${!v}" = - ] && printf -v "$v" ''; done
 proj=""; br=""; if [ "$cwd" = "$HOME" ]; then proj="~"; elif [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
 age=""; [ -n "$at" ] && age=$((now - at))
 # a window whose reset moment already passed has been renewed: 0% used, reset time unknown until fresh data arrives

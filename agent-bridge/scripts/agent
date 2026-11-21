@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # agent ping <target> | agent <target> <message...> | agent list | agent inbox | agent listen | agent up/down/status/logs/reset
 D="$(dirname "$0")"; R="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"
+dashboard_tier() {
+  local now="$1" h5="$2" wk="$3" mo="$4" h5r="$5" wkr="$6" mor="$7" best=101 penal=0 any=0 p r wn len rem tier
+  for item in "h5:18000:$h5:$h5r" "wk:604800:$wk:$wkr" "mo:2592000:$mo:$mor"; do
+    IFS=: read -r wn len p r <<< "$item"; [ -n "$p" ] || continue; any=1
+    rem=$((100 - p)); [ "$rem" -lt 0 ] && rem=0; [ "$rem" -lt "$best" ] && best="$rem"
+    if [ "$wn" != h5 ] && [ -n "$r" ] && [ "$r" -gt "$now" ] 2>/dev/null; then
+      el=$(( (len - (r - now)) * 100 / len )); [ $((p - el)) -gt 15 ] && penal=1
+    fi
+  done
+  [ "$any" = 1 ] || { echo normal; return; }
+  if [ "$best" -le 5 ]; then tier=skip; elif [ "$best" -le 20 ]; then tier=light; elif [ "$best" -le 50 ]; then tier=normal; else tier=heavy; fi
+  if [ "$penal" = 1 ]; then case "$tier" in heavy) tier=normal;; normal) tier=light;; esac; fi
+  echo "$tier"
+}
 case "$1" in
   ping) [ -n "$2" ] || { echo "usage: agent ping <target>" >&2; exit 1; }
         "$D/bridge-send" "$2" "ping from $me ($(date +%T))" ;;
@@ -60,7 +74,7 @@ case "$1" in
           case "$line" in "") state=${role/worker/off}; [ "$role" = admin ] && state=admin;; "-"*) state=off;; *LIMITED*) state=limited;; *"NO HEARTBEAT"*) state=stuck;; *WORKING*) state=working;; *idle*) state=idle;; *) state=unknown;; esac
           [ "$role" = admin ] && state=admin
           want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
-          tier=""; [ "$role" = worker ] && tier="$("$D/bridge-capacity" --tier "$n" 2>/dev/null)"
+          tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"
           case "$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$R/names.conf" | xargs basename 2>/dev/null)" in .claude*) kind=claude;; .codex*) kind=codex;; *) kind=other;; esac
           items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" \
             --arg ctx "$ctx" --arg h5 "$h5" --arg h5r "$h5r" --arg wk "$wk" --arg wkr "$wkr" --arg mo "$mo" --arg mor "$mor" --arg age "$age" \

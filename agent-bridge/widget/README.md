@@ -1,6 +1,6 @@
 # Agent Bridge Widget
 
-Widget de escritorio para Linux, macOS y Windows que muestra los estados, el contexto y las cuotas de todos los agentes del bridge. Consulta el dashboard cada 3 s por defecto y recalcula las cuentas atrás cada segundo.
+Widget de escritorio para Linux, macOS y Windows que muestra los estados, el contexto y las cuotas de todos los agentes del bridge. Consulta el dashboard cada 5 s por defecto y recalcula las cuentas atrás cada segundo.
 
 ![Ventana de Agent Bridge con seis agentes en una sesión de Linux](docs/screenshot.png)
 
@@ -15,7 +15,7 @@ npm start
 
 Electron se instala con npm y prepara su binario automáticamente en el primer arranque. El widget utiliza las bibliotecas gráficas que ya trae el escritorio. La descarga inicial requiere internet. Durante el uso, el widget lee archivos locales y la salida del comando configurado.
 
-Arrastra la ventana por el tirador del encabezado. Haz doble clic sobre el encabezado o pulsa la flecha para contraerla o expandirla. Cuando la lista supera el área de trabajo, puedes desplazarte dentro de la ventana. La bandeja permite mostrarla, ocultarla, alternar **Siempre visible**, cambiar el intervalo entre 3, 5, 10 y 30 s, y salir. La aplicación comparte una instancia por perfil de usuario y guarda las dimensiones, la posición y las preferencias en `widget.json` dentro del directorio de datos de Electron.
+Arrastra la ventana por el tirador del encabezado. Haz doble clic sobre el encabezado o pulsa la flecha para contraerla o expandirla. Cuando la lista supera el área de trabajo, puedes desplazarte dentro de la ventana. La bandeja permite mostrarla, ocultarla, alternar **Siempre visible**, cambiar el intervalo entre 5, 10 y 30 s, la vista compacta, el orden, la opacidad y el tamaño de letra. La aplicación comparte una instancia por perfil de usuario y guarda las dimensiones, la posición y las preferencias en `widget.json` dentro del directorio de datos de Electron. El refresco se pausa al ocultar o minimizar la ventana y no solapa consultas.
 
 | Acción | Linux y macOS | Windows |
 | --- | --- | --- |
@@ -47,6 +47,18 @@ Para un adaptador de Node en Windows puedes usar una ruta como `C:\Bridge\agent-
 - **Linux.** El widget inicia con `--ozone-platform-hint=auto`. En Wayland, el compositor decide si respeta la opción Siempre visible y puede limitar el ajuste de tamaño o el reposicionamiento. Si tu entorno ofrece XWayland, detén el widget y vuelve a iniciarlo con `BRIDGE_WIDGET_X11=1`. También puedes usar las opciones de ventana de tu compositor cuando estén disponibles. Algunos escritorios requieren habilitar la bandeja, en cuyo caso puedes volver a mostrar el widget con `npm start`. [Ventanas en Wayland según Electron](https://www.electronjs.org/docs/latest/api/browser-window/#platform-notices).
 - **macOS.** Los controles viven en la barra de menús. El alcance de Siempre visible depende del Space activo y de las ventanas a pantalla completa.
 - **Windows.** La fuente debe configurarse con `BRIDGE_WIDGET_CMD`. Si el icono se oculta, búscalo en el menú de iconos ocultos del área de notificación.
+
+## Interfaz y rendimiento
+
+La vista compacta muestra una fila por agente con nombre, estado, porcentaje más alto y tier. La vista detallada muestra el detalle completo con tooltip; destaca contexto superior al 40 % y tier `skip`, y resalta el límite con menos margen. El orden por urgencia coloca admin arriba y después los estados limitados, atascados y trabajando; el orden manual conserva el orden de configuración de agentes. Las capturas de antes y después están en [before.png](docs/before.png) y [screenshot.png](docs/screenshot.png).
+
+Para reducir consumo, Chromium limita el heap V8 a 128 MiB, la caché de disco a 1 MiB, desactiva corrector y extensiones y mantiene activo el throttling en segundo plano. Conservamos aceleración gráfica para compatibilidad con las ventanas transparentes en Wayland/X11.
+
+### Mediciones locales
+
+Antes: `agent dashboard --json` usaba 1,421 s de CPU de usuario y 1,447 s de sistema (2,868 s combinados; 2,424 s transcurridos). Después de calcular el tier con los datos ya leídos y reducir las invocaciones `jq` en `bridge-usage`, tres ejecuciones promediaron 1,01 s de CPU combinada y 0,85 s transcurridos. La comparación de tipos y rutas del JSON antes y después no mostró diferencias; los valores cambian entre capturas porque el estado y las cuotas siguen actualizándose.
+
+La medición inicial del widget fue 7 procesos y unos 690 MiB. Después, `ps` observó 7 procesos, 640,4 MiB RSS agregado y 6,7 % de CPU agregado en reposo. El objetivo de menos de 0,3 s de CPU por consulta aún no se alcanza: se siguen analizando los archivos fuente en cada lectura. La muestra de CPU del widget es instantánea, no una media de largo plazo.
 
 ## Verificación
 
