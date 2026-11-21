@@ -20,6 +20,7 @@ let detailName = null; let detailTimer = null; let detailPinned = true; let deta
 let activeAgent = null; let newestEventKey = ''; let newEventCount = 0; let pendingControl = null;
 const controlOptionsCache = new Map();
 let captureFeed = false;
+let adminFeedFilter = 'all';
 const toolGroupsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-groups-open') || '[]'));
 const toolDetailsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-details-open') || '[]'));
 
@@ -275,22 +276,42 @@ async function refreshDetail() {
   if (newestEventKey && nextKey && newestEventKey !== nextKey && !wasRecent) newEventCount += Math.max(1, events.filter(e => Date.parse(e.ts) > Date.parse(newestEventKey.split('|')[0])).length);
   if (!newestEventKey) { newEventCount = 0; }
   newestEventKey = nextKey;
+  const filters = document.querySelector('#feed-filters');
+  filters.hidden = agent.role !== 'admin';
+  if (agent.role === 'admin') {
+    const groups = [
+      ['all', 'Todos', events.length],
+      ['orders', 'Órdenes enviadas', events.filter(item => item.role === 'order').length],
+      ['reports', 'Reportes recibidos', events.filter(item => item.role === 'report').length],
+      ['conversation', 'Conversación con el usuario', events.filter(item => ['admin', 'user'].includes(item.role)).length],
+    ];
+    filters.replaceChildren(...groups.map(([key, label, count]) => {
+      const button = element('button', 'feed-filter', `${label} · ${count}`); button.type = 'button';
+      button.setAttribute('aria-pressed', String(adminFeedFilter === key));
+      button.addEventListener('click', () => { adminFeedFilter = key; refreshDetail(); });
+      return button;
+    }));
+  }
+  const displayedEvents = agent.role !== 'admin' || adminFeedFilter === 'all' ? events : events.filter(item =>
+    adminFeedFilter === 'orders' ? item.role === 'order' :
+      adminFeedFilter === 'reports' ? item.role === 'report' : ['admin', 'user'].includes(item.role));
   box.replaceChildren();
   let previousDay = '';
-  for (let i = 0; i < events.length;) {
-    const event = events[i];
+  for (let i = 0; i < displayedEvents.length;) {
+    const event = displayedEvents[i];
     const day = new Date(event.ts).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
     if (day !== previousDay) { box.append(element('div', 'feed-day', day)); previousDay = day; }
     const timestamp = new Date(event.ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     if (event.role === 'tool' || event.role === 'tool_result') {
       const groupStart = i; const groupEvents = [];
-      while (i < events.length && ['tool', 'tool_result'].includes(events[i].role)) groupEvents.push(events[i++]);
+      while (i < displayedEvents.length && ['tool', 'tool_result'].includes(displayedEvents[i].role)) groupEvents.push(displayedEvents[i++]);
       const key = groupEvents.map(toolEventKey).join('~');
       const rowsId = `feed-tool-rows-${groupStart}`;
       const group = element('section', 'feed-tool-group');
       const head = element('button', 'feed-tool-group-head'); head.type = 'button'; head.setAttribute('aria-controls', rowsId); head.setAttribute('aria-expanded', String(toolGroupsOpen.has(key)));
       const calls = groupEvents.filter(item => item.role === 'tool');
       const results = groupEvents.filter(item => item.role === 'tool_result');
+      if (!calls.length) continue;
       const label = element('span', '', `Herramientas (${calls.length})`);
       const counts = new Map(); for (const item of calls) counts.set(item.tool || 'Herramienta', (counts.get(item.tool || 'Herramienta') || 0) + 1);
       const names = [...counts].map(([name, count]) => `${name}${count > 1 ? ` ×${count}` : ''}`).join(', ');
@@ -315,11 +336,12 @@ async function refreshDetail() {
       group.append(head, rows); box.append(group); continue;
     }
     i++;
-    const role = event.role === 'order' ? 'admin' : event.role;
+    const role = event.role === 'order' ? 'admin' : event.role === 'assistant' ? 'assistant' : event.role;
     const row = element('article', `feed-message feed-${role}`);
     row.dataset.eventKey = `${event.ts}|${event.role}|${event.text}`;
     const byline = element('div', 'feed-byline');
-    byline.append(element('strong', '', event.role === 'order' ? `Admin · ${snapshot.data?.agents?.find(a => a.role === 'admin')?.name || 'admin'}` : agent.name));
+    const speaker = event.role === 'order' ? `Admin → ${event.to || agent.name}` : event.role === 'report' ? `${event.from || agent.name} → Admin` : event.role === 'admin' ? 'Admin' : event.role === 'user' ? 'Usuario' : agent.name;
+    byline.append(element('strong', '', speaker));
     byline.append(element('time', '', timestamp));
     if (event.role === 'result') byline.append(element('span', `feed-result-chip ${/error|fail|timeout|limit/i.test(event.text) ? 'is-error' : 'is-ok'}`, /error|fail|timeout|limit/i.test(event.text) ? 'Error' : 'OK'));
     row.append(byline);

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseClaude, parseCodex, redact, tail, selectEvents } = require('../../scripts/bridge-feed');
+const { feed, parseClaude, parseAdminClaude, parseCodex, redact, tail, tailUseful, selectEvents } = require('../../scripts/bridge-feed');
 const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
 test('parsea mensajes Claude, herramienta y resultado', () => {
   assert.equal(parseClaude(JSON.stringify({type:'user',timestamp:'2026-01-01T00:00:00Z',message:{content:[{type:'text',text:'hola'}]}}))[0].role,'order');
@@ -21,6 +21,34 @@ test('parsea formato Codex', () => {
   assert.equal(objectTool[0].text, '{"cmd":"pwd","args":["-P"]}');
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'message',role:'developer',content:[{text:'contexto'}]}})).length,0);
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'custom_tool_call_output',name:'exec',output:'done'}}))[0].role,'tool_result');
+});
+test('lee transcript anonimizado del admin y clasifica órdenes, reportes, conversación y ping', () => {
+  const fixture = path.join(__dirname, 'fixtures/admin-transcript-anonymized.jsonl');
+  const events = tailUseful(fixture, parseAdminClaude, 200);
+  assert.deepEqual(events.map(({ role }) => role), ['order', 'report', 'admin', 'order', 'report', 'report']);
+  assert.deepEqual([events[0].to, events[0].text], ['codex-3', 'Implementa el fix del panel']);
+  assert.deepEqual([events[1].from, events[1].text], ['codex-3', 'Hecho; commit abc1234']);
+  assert.equal(events[3].text, 'ping');
+  assert.equal(events[4].text, 'Validación terminada');
+  assert.equal(events[5].text, 'La tarea de interfaz quedó lista.');
+});
+test('feed del admin usa transcript_path de usage y límite por defecto de 200', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-admin-feed-'));
+  const fixture = path.join(__dirname, 'fixtures/admin-transcript-anonymized.jsonl');
+  fs.mkdirSync(path.join(root, 'usage'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'names.conf'), '/home/test/.claude-admin=claude-1\n/home/test/.claude-worker=codex-3\n');
+  fs.writeFileSync(path.join(root, 'admin'), 'claude-1\n');
+  fs.writeFileSync(path.join(root, 'usage/claude-1.json'), JSON.stringify({ transcript_path: fixture, session_id: 'anon-session' }));
+  const previous = process.env.BRIDGE_DIR; process.env.BRIDGE_DIR = root;
+  try {
+    const result = feed('claude-1');
+    assert.equal(result.events.length, 6);
+    assert.equal(result.events[0].role, 'order');
+    assert.equal(result.events.at(-1).role, 'report');
+  } finally {
+    if (previous === undefined) delete process.env.BRIDGE_DIR; else process.env.BRIDGE_DIR = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 test('elimina envoltorio del runner y ruido AGENTS', () => {
   const wrapped = "You are worker 'codex-2' in a team.\n\nOrder:\n# AGENTS.md instructions\nmetadata\n<environment_context>\nvariables\n</environment_context>\n\nOrder real: arregla esto";

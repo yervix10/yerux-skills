@@ -286,8 +286,13 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .feed-day { align-self: center; margin: 3px 0; padding: 3px 9px; color: var(--muted); background: var(--badge); border-radius: 999px; font-size: 9px; }
 .feed-message { max-width: 94%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 13px; background: var(--card); overflow-wrap: anywhere; }
 .feed-admin { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--card)); border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); border-bottom-right-radius: 4px; }
+.feed-user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--card)); border-bottom-right-radius: 4px; }
 .feed-assistant { align-self: flex-start; background: color-mix(in srgb, var(--tier-light) 9%, var(--card)); border-bottom-left-radius: 4px; }
+.feed-report { align-self: flex-start; background: color-mix(in srgb, var(--tier-heavy) 9%, var(--card)); border-bottom-left-radius: 4px; }
 .feed-result { align-self: flex-start; background: color-mix(in srgb, var(--green) 9%, var(--card)); }
+.feed-filters { display: flex; gap: 4px; padding: 4px 0; overflow-x: auto; }
+.feed-filter { flex: 0 0 auto; padding: 4px 7px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; background: var(--card); font: 8px system-ui, sans-serif; cursor: pointer; }
+.feed-filter[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .feed-byline { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--accent); font-size: 9px; }
 .feed-assistant .feed-byline { color: var(--tier-light); }
 .feed-byline time, .feed-time { margin-left: auto; color: var(--faint); font-size: 8px; }

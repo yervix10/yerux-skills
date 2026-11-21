@@ -319,7 +319,9 @@ async function createWidget() {
     const script = feedScript();
     if (!script) return unavailable;
     return new Promise((resolve) => {
-      execFile(script, [name, '--json', '--limit', '60'], { encoding: 'utf8', timeout: 8000, maxBuffer: 4 * 1024 * 1024, env: process.env }, (error, stdout) => {
+      const agent = snapshot.data.agents.find(item => item.name === name);
+      const limit = agent?.role === 'admin' ? '200' : '60';
+      execFile(script, [name, '--json', '--limit', limit], { encoding: 'utf8', timeout: 8000, maxBuffer: 4 * 1024 * 1024, env: process.env }, (error, stdout) => {
         if (error) { console.error('feed falló:', error.message); return resolve(unavailable); }
         try { resolve(JSON.parse(stdout)); } catch { resolve(unavailable); }
       });

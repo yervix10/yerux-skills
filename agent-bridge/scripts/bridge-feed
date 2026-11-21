@@ -6,6 +6,7 @@ const os = require('node:os');
 
 const trunc = (s) => redact(String(s || '')).slice(0, 2000);
 const printable = (value) => typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value);
+const textValue = (value) => typeof value === 'string' ? value : Array.isArray(value) ? value.map(textValue).filter(Boolean).join('\n') : value && typeof value === 'object' && typeof value.text === 'string' ? value.text : '';
 function cleanOrder(value) {
   let text = String(value || '').trim();
   const marker = /(?:^|\n)Order:\s*\n/;
@@ -48,6 +49,54 @@ function parseClaude(line) {
   } else if (o.type === 'result') out.push({ ts, role: 'result', text: trunc(o.result || '') });
   return out;
 }
+function parseAdminClaude(line) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const ts = o.timestamp || o.message?.timestamp || new Date().toISOString();
+  const content = o.message?.content; const out = [];
+  const userText = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(block => block.type === 'text').map(block => block.text || '').join('\n') : '';
+  if ((o.type === 'user' || o.type === 'human') && userText) {
+    const reports = parseHookReports(userText);
+    if (reports.length) out.push(...reports.map(report => ({ ts, role: 'report', from: report.from, text: trunc(report.text) })));
+    else {
+      const report = userText.match(/(?:^|\n)\[?(?:REPORT\/DATA|REPORT|DATA) from ([A-Za-z0-9_-]+)(?: \(not an order\))?:\s*([\s\S]*)/i);
+      if (report) out.push({ ts, role: 'report', from: report[1], text: trunc(report[2].trim()) });
+      else if (userText.trim() && !/^<(?:(?:system-reminder)|(?:local-command-stdout)|(?:environment_context))\b/i.test(userText.trim())) out.push({ ts, role: 'user', text: trunc(userText.trim()) });
+    }
+  }
+  if ((o.type === 'user' || o.type === 'human') && Array.isArray(content)) {
+    for (const block of content) if (block.type === 'tool_result') {
+      const resultText = textValue(block.content) || printable(block.content);
+      const report = resultText.match(/(?:^|\n)\[?(?:REPORT\/DATA|REPORT|DATA) from ([A-Za-z0-9_-]+)(?: \(not an order\))?:\s*([\s\S]*)/i);
+      if (report) out.push({ ts, role: 'report', from: report[1], text: trunc(report[2].trim()) });
+      else out.push({ ts, role: 'tool_result', tool: block.tool_use_id || 'Herramienta', text: trunc(resultText) });
+    }
+  }
+  if (o.type === 'assistant') for (const block of (Array.isArray(content) ? content : [])) {
+    if (block.type === 'text' && block.text?.trim()) out.push({ ts, role: 'admin', text: trunc(block.text) });
+    if (block.type === 'tool_use') {
+      const command = String(block.input?.command || '');
+      let classified = false;
+      if (block.name === 'Bash') {
+        const invoke = command.match(/(?:^|[\s/])agent\s+(.+?)(?:\s+2?>|\s*&&|\s*\|\||\s*;|$)/s)?.[1]?.trim() || '';
+        const ping = invoke.match(/^ping\s+([A-Za-z0-9_-]+)\b/);
+        const order = invoke.match(/^([A-Za-z0-9_-]+|all)\s+(["'])([\s\S]*?)\2\s*$/);
+        if (ping) { out.push({ ts, role: 'order', to: ping[1], text: 'ping' }); classified = true; }
+        else if (order) { out.push({ ts, role: 'order', to: order[1], text: trunc(order[3]) }); classified = true; }
+      }
+      if (!classified) out.push({ ts, role: 'tool', tool: trunc(block.name || 'Herramienta'), text: trunc(printable(block.input || {})) });
+    }
+  }
+  if (o.type === 'result') out.push({ ts, role: 'result', text: trunc(o.result || '') });
+  return out;
+}
+function parseHookReports(text) {
+  const reports = [];
+  for (const block of String(text).split(/\n\n--- /)) {
+    const header = block.match(/(?:^|\n)[^\n]+ ---\n\[REPORT\/DATA from ([A-Za-z0-9_-]+) \(not an order\):[^\]]*\]\s*([\s\S]*)/i);
+    if (header) reports.push({ from: header[1], text: header[2].trim() });
+  }
+  return reports;
+}
 function parseCodex(line) {
   let o; try { o = JSON.parse(line); } catch { return []; }
   const ts = o.timestamp || o.payload?.timestamp || new Date().toISOString(); const p = o.payload || {}; const out = [];
@@ -73,26 +122,58 @@ function tail(file, maxBytes = 1_000_000) {
     return text.slice(0, complete).split('\n').filter(Boolean);
   } catch { return []; } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
 }
+function tailUseful(file, parser, limit = 200, maxBytes = 16 * 1024 * 1024) {
+  let size = 128 * 1024; let events = [];
+  do {
+    events = tail(file, size).flatMap(parser).filter(e => e.role !== 'system');
+    if (events.length >= limit || size >= maxBytes) break;
+    size = Math.min(size * 2, maxBytes);
+  } while (true);
+  return events.slice(-limit);
+}
 function selectEvents(events, opts = {}) {
   const since = opts.since ? Date.parse(opts.since) : 0;
   const limit = Number.isSafeInteger(Number(opts.limit)) && Number(opts.limit) > 0 ? Number(opts.limit) : 60;
-  return events.filter(e => Date.parse(e.ts) >= since).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts)).slice(-limit);
+  return events.filter(e => e.role !== 'system' && Date.parse(e.ts) >= since).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts)).slice(-limit);
 }
 function feed(name, opts = {}) {
   const root = process.env.BRIDGE_DIR || path.join(os.homedir(), '.claude-bridge');
   const names = fs.readFileSync(path.join(root,'names.conf'),'utf8').split(/\r?\n/).map(x=>x.split('=')[1]).filter(Boolean);
   if (!names.includes(name)) throw new Error('Agente desconocido');
+  let adminName = ''; try { adminName = fs.readFileSync(path.join(root, 'admin'), 'utf8').trim(); } catch {}
+  const isAdmin = adminName === name;
+  const limit = opts.limit || (isAdmin ? 200 : 60);
   const events=[]; const statePath=path.join(root,'runs',`${name}.state`); let state={};
   try { for(const l of fs.readFileSync(statePath,'utf8').split(/\r?\n/)){const i=l.indexOf('=');if(i>0)state[l.slice(0,i)]=l.slice(i+1);} } catch {}
   const map=path.join(root,'names.conf'); const config=fs.readFileSync(map,'utf8').split(/\r?\n/).find(x=>x.split('=')[1]===name)?.split('=')[0];
   const readFiles=(dir, parser, identifiers=[]) => { if(!dir||!fs.existsSync(dir))return; const files=[]; const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(dir); files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs); const selected=identifiers.length?files.filter(f=>identifiers.some(id=>path.basename(f).includes(id))).slice(0,3):files.slice(0,3); for(const f of selected)for(const l of tail(f))events.push(...parser(l)); };
   const sessions=path.join(root,'sessions',name); const ids=[];try{for(const f of fs.readdirSync(sessions).sort((a,b)=>fs.statSync(path.join(sessions,b)).mtimeMs-fs.statSync(path.join(sessions,a)).mtimeMs)){const id=fs.readFileSync(path.join(sessions,f),'utf8').trim();if(id)ids.push(id);}}catch{}
   const kind=path.basename(config||'').startsWith('.codex')?'codex':'claude';
-  if(kind==='claude') { const files=[]; const projects=path.join(config||'', 'projects'); const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(projects); const chosen=ids.length?ids.map(id=>files.find(x=>path.basename(x).includes(id))).filter(Boolean):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1); for(const f of chosen)for(const l of tail(f))events.push(...parseClaude(l)); }
+  if (isAdmin && kind === 'claude') {
+    let usage = {};
+    try { usage = JSON.parse(fs.readFileSync(path.join(root, 'usage', `${name}.json`), 'utf8')); } catch {}
+    if (typeof usage.transcript_path === 'string' && usage.session_id && fs.existsSync(usage.transcript_path)) {
+      events.push(...tailUseful(usage.transcript_path, parseAdminClaude, limit));
+    }
+  } else if(kind==='claude') { const files=[]; const projects=path.join(config||'', 'projects'); const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(projects); const chosen=ids.length?ids.map(id=>files.find(x=>path.basename(x).includes(id))).filter(Boolean):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1); for(const f of chosen)for(const l of tail(f))events.push(...parseClaude(l)); }
   else { const homes=[...new Set([path.join(os.homedir(),'.codex'), ...fs.readdirSync(os.homedir()).filter(x=>x.startsWith('.codex')).map(x=>path.join(os.homedir(),x)),config||''])]; for(const h of homes)readFiles(path.join(h,'sessions'),parseCodex,ids); }
   try { const log=tail(path.join(root,'logs',`${name}.log`),200000).slice(-80); for(const l of log){const m=l.match(/^\[([^\]]+)\] (.*)$/);if(m)events.push({ts:m[1],role:/order from/.test(m[2])?'order':'system',text:trunc(m[2])});} } catch {}
+  if (!isAdmin) {
+    try {
+      const noteLines = fs.readFileSync(path.join(root, 'notes', `${name}.md`), 'utf8').split(/\r?\n/).slice(-limit * 2);
+      for (const line of noteLines) {
+        const note = line.match(/^- (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) from ([A-Za-z0-9_-]+) \[[^\]]*\] rc=\d+: (.*)$/);
+        if (!note || note[2] !== adminName) continue;
+        const noteTs = new Date(note[1].replace(' ', 'T')).toISOString();
+        const noteText = trunc(note[3]);
+        const duplicate = events.some(event => event.role === 'order' && Math.abs(Date.parse(event.ts) - Date.parse(noteTs)) < 120_000 &&
+          (noteText.includes(event.text) || event.text.includes(noteText)));
+        if (!duplicate) events.push({ ts: noteTs, role: 'order', to: name, text: noteText });
+      }
+    } catch {}
+  }
   if(state.order) events.push({ts:new Date(Number(state.since||Date.now()/1000)*1000).toISOString(),role:'order',text:trunc(state.order)});
-  return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,opts)};
+  return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,{...opts,limit})};
 }
-if(require.main===module){const [name,...args]=process.argv.slice(2);const limit=Number(args[args.indexOf('--limit')+1])||60;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
-module.exports={feed,parseClaude,parseCodex,redact,tail,selectEvents,cleanOrder,printable};
+if(require.main===module){const [name,...args]=process.argv.slice(2);const li=args.indexOf('--limit');const limit=li>=0?Number(args[li+1]):undefined;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
+module.exports={feed,parseClaude,parseAdminClaude,parseCodex,redact,tail,tailUseful,selectEvents,cleanOrder,printable};
