@@ -7,7 +7,8 @@
 - `BRIDGE_REASSIGN=1`: on a usage limit the order goes to an idle worker. `agent dashboard`. Desktop notifications (`BRIDGE_NOTIFY=0` mutes).
 - Installer: `--check --fix` repairs only failing accounts, notices a newer upstream version, final box says which accounts were
   "already up to date" vs "updated". `--uninstall` removes the Codex hook approvals it added.
-- `--safe` / `BRIDGE_BYPASS=safe` mode for workers (Linux/macOS only).
+- `--safe` / `BRIDGE_BYPASS=safe` mode for workers.
+- Windows: reassign on limit, `agent dashboard`, desktop notifications (balloon tip) and `-Safe` ported (untested on Windows).
 
 ## 1.1.0
 

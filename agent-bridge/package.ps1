@@ -36,7 +36,7 @@ function Ab-Install-Global {
     # .cmd for cmd.exe / PowerShell; extensionless sh stub for Git Bash
     Write-Text (Join-Path $Bin "$c.cmd") "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0bridge.ps1`" $c %*`r`n"
     Write-Text (Join-Path $Bin $c) "#!/bin/sh`nexec powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"`$(cygpath -w `"`$HOME/.claude-bridge/bin/bridge.ps1`" 2>/dev/null || echo `"`$HOME/.claude-bridge/bin/bridge.ps1`")`" $c `"`$@`"`n" }
-  Write-Text (Join-Path $BR 'config') ("BYPASS=" + $(if ($optBypass) { '1' } else { '0' }) + "`n")
+  Write-Text (Join-Path $BR 'config') ("BYPASS=" + $(if ($optSafe) { 'safe' } elseif ($optBypass) { '1' } else { '0' }) + "`n")
   $lines = foreach ($k in $Map.Keys) { "$k=$($Map[$k])" }; Write-Text $conf (($lines -join "`n") + "`n")
   $userPath = [string][Environment]::GetEnvironmentVariable('Path', 'User')
   if ($optPath -and -not (($userPath -split ';') | Where-Object { $_ -ieq $Bin })) { [Environment]::SetEnvironmentVariable('Path', (($userPath.TrimEnd(';') + ';' + $Bin).TrimStart(';')), 'User'); Say "added $Bin to your user PATH (open a new terminal)" } }

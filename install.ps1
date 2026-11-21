@@ -1,10 +1,10 @@
 # yerux-skills installer (Windows): finds every Claude Code / Codex account and installs the featured package
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge\package.ps1.
 # Interactive menu in a console; -Yes accepts everything detected.
-# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
+# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-Safe] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\install.ps1
-param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
+param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$Safe, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -166,7 +166,7 @@ $PkgAb = $true; $SelSkills = @()
 if ($Skills -eq 'all') { $SelSkills = @($SkList | ForEach-Object { $_.Name }) } elseif ($Skills -and $Skills -ne 'none') { $SelSkills = @($Skills -split '[,\s]+' | Where-Object { $_ }) }
 
 # ---------- interactive menu (arrows + space) ----------
-$optSkill = $true; $optHooks = $true; $optBypass = -not $NoBypass; $optPath = -not $NoPath; $optTrust = -not $NoTrust
+$optSkill = $true; $optHooks = $true; $optBypass = -not $NoBypass; $optSafe = [bool]$Safe; $optPath = -not $NoPath; $optTrust = -not $NoTrust
 function YN($q, $def) { $d = if ($def) { 'Y/n' } else { 'y/N' }; $r = Read-Host "  $($S.arrow) $q [$d]"; if ($r -match '^[Yy]') { return $true }; if ($r -match '^[Nn]') { return $false }; return $def }
 # Items: objects with Label, Sub, On, Feat. $onKey is an optional scriptblock called with the pressed char (may modify $items; returns extra lines it printed).
 $script:MsBack = $false
@@ -247,7 +247,7 @@ if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [C
       $pkn = @(); if ($PkgAb) { $pkn += 'agent-bridge' }; $pkn += $SelSkills; $pkt = if ($pkn.Count) { $pkn -join ', ' } else { 'none' }
       if ($pkt.Length -gt 58) { $pkt = $pkt.Substring(0, 55) + "...  ($($pkn.Count) packages)" }
       $sum = @("Accounts     $($Claude.Count + $Codex.Count)  ($($Claude.Count) claude / $($Codex.Count) codex)", "Packages     $pkt")
-      if ($PkgAb) { $sum += "agent-bridge skill+commands, hook" + $(if ($optTrust) { ', auto-approve Codex hooks' }) + $(if ($optBypass) { ', bypass workers' }) + $(if ($optPath) { ', PATH' }) }
+      if ($PkgAb) { $sum += "agent-bridge skill+commands, hook" + $(if ($optTrust) { ', auto-approve Codex hooks' }) + $(if ($optSafe) { ', safe-mode workers' } elseif ($optBypass) { ', bypass workers' }) + $(if ($optPath) { ', PATH' }) }
       Ui-Box 'Summary' $sum
       if (YN 'Install now?' $true) { break }
       if ($PkgAb) { $step = 3 } else { $step = 2 } } }
