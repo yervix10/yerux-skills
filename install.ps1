@@ -1,10 +1,10 @@
 # yerux-skills installer (Windows): finds every Claude Code / Codex account and installs the featured package
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge\package.ps1.
 # Interactive menu in a console; -Yes accepts everything detected.
-# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-NoPath] [-NoTrust] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
+# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\install.ps1
-param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Yes, [switch]$NoBypass, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
+param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -127,6 +127,30 @@ if ($Uninstall) {
   foreach ($d in $Codex) { Say "uninstalling Codex: $d"; if ($DryRun) { continue }; Ab-Uninstall-Codex $d; Remove-Skills $d }
   Say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; return }
 
+
+# ---------- check: scripts, hooks, names, skills and Codex hook approval of every account ----------
+if ($Check) {
+  $script:bad = 0
+  function Chk-Ok($t) { Ui-Ok $t }; function Chk-Bad($t) { Ui-Fail $t; $script:bad++ }
+  function Has-BridgeHook($file) { if (-not (Test-Path $file)) { return $false }; $j = Load-Json $file
+    if (-not $j.PSObject.Properties['hooks']) { return $false }
+    foreach ($p in @($j.hooks.PSObject.Properties)) { foreach ($e in @($p.Value)) { if (Is-Bridge $e) { return $true } } }
+    return $false }
+  Ui-H 'Check'
+  foreach ($f in 'bridge.ps1', 'agent.cmd', 'admin.cmd') { if (Test-Path (Join-Path $Bin $f)) { Chk-Ok "script $f" } else { Chk-Bad "script $f missing in $Bin" } }
+  $skillText = For-Windows (Read-Text (Join-Path $Src 'SKILL.md'))
+  $py = Get-Command python3, python, py -ErrorAction SilentlyContinue | Select-Object -First 1
+  foreach ($d in $Claude) { $n = $Map[$d]; $sj = Join-Path $d 'settings.json'
+    if (Has-BridgeHook $sj) { Chk-Ok "Claude  $n  hook" } else { Chk-Bad "Claude  $n  hook missing" }
+    $jj = Load-Json $sj; if ($jj.PSObject.Properties['env'] -and $jj.env.BRIDGE_NAME -eq $n) { Chk-Ok "Claude  $n  name" } else { Chk-Bad "Claude  $n  BRIDGE_NAME not set" }
+    if ((Read-Text (Join-Path $d 'skills\agent-bridge\SKILL.md')) -eq $skillText) { Chk-Ok "Claude  $n  skill up to date" } else { Chk-Bad "Claude  $n  skill missing or outdated" } }
+  foreach ($d in $Codex) { $n = $Map[$d]
+    if (Has-BridgeHook (Join-Path $d 'hooks.json')) { Chk-Ok "Codex   $n  hook" } else { Chk-Bad "Codex   $n  hook missing" }
+    if ($py -and (Get-Command codex -ErrorAction SilentlyContinue)) {
+      $a = @((Join-Path $Src 'scripts\codex-trust-hooks'), $d, '--check'); if ($py.Name -like 'py*') { $a = @('-3') + $a }
+      $out = & $py.Source @a 2>&1; if ($LASTEXITCODE -eq 0) { Chk-Ok "Codex   $n  hooks approved" } else { Chk-Bad "Codex   $n  $(@($out | Where-Object { $_ -match 'untrusted' }).Count) hook(s) not approved: reinstall or run /hooks" } }
+    if ((Read-Text (Join-Path $d 'skills\agent-bridge\SKILL.md')) -eq $skillText) { Chk-Ok "Codex   $n  skill up to date" } else { Chk-Bad "Codex   $n  skill missing or outdated" } }
+  Say ''; if ($script:bad -eq 0) { Ui-Info 'everything looks fine'; return } else { Ui-W "  ! $($script:bad) problem(s): run .\install.ps1 to repair" 'Yellow'; exit 1 } }
 
 if (-not $List -and -not $Uninstall) { Ui-Banner }
 # ---------- skills of this repo (every folder with a SKILL.md besides agent-bridge) ----------

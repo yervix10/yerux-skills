@@ -33,7 +33,7 @@ Tests: `tests/run.sh`.
     powershell -ExecutionPolicy Bypass -File .\install.ps1 -List
     powershell -ExecutionPolicy Bypass -File .\install.ps1
 
-Windows options: `-Yes`, `-DryRun`, `-NoBypass`, `-NoPath`, `-NoTrust` (do not pre-approve the Codex hooks; needs python on PATH).
+Windows options: `-Check` (verify the install), `-Yes`, `-DryRun`, `-NoBypass`, `-NoPath`, `-NoTrust` (do not pre-approve the Codex hooks; needs python on PATH).
 Runtime: `agent-bridge/windows/bridge.ps1` (PowerShell 5.1+). It adds `agent` and `admin` commands to your PATH.
 Accounts inside WSL are installed by running `./install.sh` from WSL.
 

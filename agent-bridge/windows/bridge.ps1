@@ -119,14 +119,37 @@ function Invoke-Agent($a) {
         $st = Read-State $n; $line = "${n}: UP"
         if (-not $st.status) { $line += '  (no state yet: restart it with agent down/up)' }
         elseif ($st.beat -and ($now - [int64]$st.beat) -gt 120) { $line += "  NO HEARTBEAT for $([int](($now - [int64]$st.beat) / 60)) min: the runner looks stuck (agent down $n; agent up $n)" }
-        elseif ($st.status -eq 'working') { $el = $now - [int64]$st.since; $line += "  WORKING $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" })  ($($st.order))" }
+        elseif ($st.status -eq 'limited') { $line += "  LIMITED, paused until $([DateTimeOffset]::FromUnixTimeSeconds([int64]$st.pause_until).LocalDateTime.ToString('HH:mm'))" }
+        elseif ($st.status -eq 'working') { $el = $now - [int64]$st.since; $line += "  WORKING $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" })  ($($st.order))"
+          if ($st.activity) { $line += "  now: $($st.activity) [$($now - [int64]$st.activity_at)s ago]" } }
         else { $line += '  idle'; if ($st.last_kind) { $line += " $([char]0xB7) last order: $($st.last_kind) ($([DateTimeOffset]::FromUnixTimeSeconds([int64]$st.last_end).LocalDateTime.ToString('HH:mm')))" } }
         Write-Output $line } }
-    'logs'   { $st = Read-State $a[1]; if ($st.status) { Write-Output "status: $($st.status)"; if ($st.order) { Write-Output "order: $($st.order)" }; if ($st.last_kind) { Write-Output "last result: $($st.last_kind)" } }
+    'logs'   { $st = Read-State $a[1]; if ($st.status) { Write-Output "status: $($st.status)"; if ($st.order) { Write-Output "order: $($st.order)" }; if ($st.activity) { Write-Output "doing: $($st.activity)" }; if ($st.last_kind) { Write-Output "last result: $($st.last_kind)" } }
       $lf = Join-Path $B "logs\$($a[1]).log"; if (Test-Path $lf) { Get-Content $lf -Tail 30 } }
+    'wt' {
+      $sub = if ($a[1]) { $a[1] } else { 'list' }; $wn = $a[2]; $yes = @($a) -contains '--yes'
+      $top = (& git rev-parse --show-toplevel 2>$null); if ($LASTEXITCODE -ne 0 -or -not $top) { Write-Error 'agent wt: run it inside a git project'; return }
+      $cd = ([string](& git rev-parse --path-format=absolute --git-common-dir 2>$null)).Trim() -replace '/', '\'; $root = (Split-Path $cd -Parent)
+      switch ($sub) {
+        'list' { $found = $false; $base = (& git -C $root rev-parse --abbrev-ref HEAD)
+          foreach ($d in (Get-ChildItem (Join-Path $root '.worktrees') -Directory -ErrorAction SilentlyContinue)) { $found = $true
+            $br = (& git -C $d.FullName rev-parse --abbrev-ref HEAD); $ahead = (& git -C $root rev-list --count "$base..$br"); $dirty = @(& git -C $d.FullName status --short).Count
+            Write-Output "$($d.Name): branch $br, $ahead commit(s) ahead of $base, $dirty uncommitted file(s)" }
+          if (-not $found) { Write-Output "no worktrees in $root\.worktrees" } }
+        'diff' { if (-not $wn) { Write-Error 'usage: agent wt diff <name>'; return }; & git -C $root diff --stat "HEAD...mejora/$wn" }
+        'merge' { if (-not $wn) { Write-Error 'usage: agent wt merge <name> [--yes]'; return }; $d = Join-Path $root ".worktrees\$wn"
+          if (-not (Test-Path $d)) { Write-Error "no worktree for $wn"; return }
+          if (@(& git -C $d status --short).Count -gt 0) { Write-Error "$wn has uncommitted changes; ask it to commit first"; return }
+          if (@(& git -C $root status --short --untracked-files=no).Count -gt 0) { Write-Error 'the main checkout has uncommitted changes; commit or stash them first'; return }
+          $base = (& git -C $root rev-parse --abbrev-ref HEAD); Write-Output "would merge mejora/$wn into ${base}:"; & git -C $root log --oneline "$base..mejora/$wn"
+          if (-not $yes) { Write-Output '(add --yes to merge)'; return }; & git -C $root merge --no-ff -m "Merge mejora/$wn" "mejora/$wn" }
+        'clean' { if (-not $wn) { Write-Error 'usage: agent wt clean <name> [--yes]'; return }; $d = Join-Path $root ".worktrees\$wn"
+          if (-not $yes) { Write-Output "would remove $d and delete branch mejora/$wn if it is merged (add --yes)"; return }
+          & git -C $root worktree remove $d; if ($LASTEXITCODE -eq 0) { & git -C $root branch -d "mejora/$wn" } }
+        default { Write-Error 'agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]' } } }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
-      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent admin [who|release]' }
+      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
     default  { Send-Msg $a[0] (Join-Rest $a 1) } } }
 
 # ---- runner: headless worker with memory (resumes its conversation per working directory) ----
@@ -168,12 +191,31 @@ function Invoke-Runner($name) {
     if (Test-Path $cand -PathType Container) { return $cand } else { return $wt } }
   # ---- observability: state file (read by `agent status`), heartbeat and alerts to the admin ----
   $alert = if ($env:BRIDGE_ALERT) { [int]$env:BRIDGE_ALERT } else { $a2 = ([regex]::Match((Read-Text (Join-Path $B 'config')), 'ALERT=(\d+)')).Groups[1].Value; if ($a2) { [int]$a2 } else { 1800 } }
+  $stall = if ($env:BRIDGE_STALL) { [int]$env:BRIDGE_STALL } else { 600 }
+  $limitPause = if ($env:BRIDGE_LIMIT_PAUSE) { [int]$env:BRIDGE_LIMIT_PAUSE } else { 300 }
+  $live = Join-Path $B "logs\$name.live"
   $stf = Join-Path $B "runs\$name.state"
-  $st = @{ status = 'idle'; since = (Get-Epoch); order = ''; last_end = ''; last_rc = ''; last_kind = ''; beatAt = 0 }
+  $st = @{ status = 'idle'; since = (Get-Epoch); order = ''; last_end = ''; last_rc = ''; last_kind = ''; beatAt = 0; activity = ''; activityAt = ''; pauseUntil = 0; stalledAt = '' }
   function Write-State { $st.beatAt = Get-Epoch
-    $t = "status=$($st.status)`nsince=$($st.since)`nbeat=$(Get-Epoch)`norder=$($st.order)`nlast_end=$($st.last_end)`nlast_rc=$($st.last_rc)`nlast_kind=$($st.last_kind)`n"
+    $t = "status=$($st.status)`nsince=$($st.since)`nbeat=$(Get-Epoch)`norder=$($st.order)`nlast_end=$($st.last_end)`nlast_rc=$($st.last_rc)`nlast_kind=$($st.last_kind)`nactivity=$($st.activity)`nactivity_at=$($st.activityAt)`npause_until=$($st.pauseUntil)`n"
     try { Write-Text $stf $t } catch {} }
-  function Beat { if ((Get-Epoch) - $st.beatAt -ge 5) { Write-State } }
+  # live stream-json log of a Claude worker: last tool call, final result and rate-limit reset
+  function Read-Live { if (Test-Path $live) { @(Get-Content -LiteralPath $live -Encoding UTF8 -ErrorAction SilentlyContinue) } else { @() } }
+  function ConvertFrom-Line($l) { $l = ([string]$l).TrimStart([char]0xFEFF); if (-not $l.StartsWith('{')) { return $null }; try { return ($l | ConvertFrom-Json) } catch { return $null } }
+  function Update-Activity {
+    if (-not (Test-Path $live)) { return }
+    $act = ''
+    foreach ($l in (Read-Live | Select-Object -Last 40)) { $e = ConvertFrom-Line $l
+      if ($e -and $e.type -eq 'assistant') { foreach ($c in @($e.message.content)) { if ($c.type -eq 'tool_use') {
+        $arg = @($c.input.command, $c.input.file_path, $c.input.pattern, $c.input.description) | Where-Object { $_ } | Select-Object -First 1
+        $act = ("$($c.name) $arg" -replace '\s+', ' '); if ($act.Length -gt 80) { $act = $act.Substring(0, 80) } } } } }
+    $st.activity = $act; $st.activityAt = [DateTimeOffset]::new((Get-Item $live).LastWriteTimeUtc).ToUnixTimeSeconds() }
+  function Parse-Live { $o = @{ result = $null; isErr = $false; resetAt = $null }
+    foreach ($l in (Read-Live)) { $e = ConvertFrom-Line $l; if (-not $e) { continue }
+      if ($e.type -eq 'result') { $o.result = [string]$e.result; $o.isErr = [bool]$e.is_error }
+      elseif ($e.type -eq 'rate_limit_event' -and $e.rate_limit_info.status -eq 'rejected') { $o.resetAt = [int64]$e.rate_limit_info.resetsAt } }
+    return $o }
+  function Beat { if ((Get-Epoch) - $st.beatAt -ge 5) { if ($st.status -eq 'working' -and $kind -eq 'claude') { Update-Activity }; Write-State } }
   function Classify($rc, $text) {
     $low = $text.ToLower()
     if ($rc -eq 124) { return 'timeout' }
@@ -186,6 +228,8 @@ function Invoke-Runner($name) {
   Write-State
   while ($true) {
     $f = Get-ChildItem (Join-Path $B "inbox\$name") -Filter '*.msg' -File -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
+    if ((Get-Epoch) -lt $st.pauseUntil) { if ($st.status -ne 'limited') { $st.status = 'limited'; Write-State }; Beat; Start-Sleep -Seconds 2; continue }
+    if ($st.status -eq 'limited') { $st.status = 'idle'; Write-State }
     if (-not $f) { Beat; Start-Sleep -Seconds 1; continue }
     Start-Sleep -Milliseconds 300
     $raw = Read-Text $f.FullName; $base = [IO.Path]::GetFileNameWithoutExtension($f.Name)
@@ -209,7 +253,8 @@ function Invoke-Runner($name) {
     $newId = $null; $outFile = $null
     if ($kind -eq 'claude') {
       $envs['CLAUDE_CONFIG_DIR'] = $dir
-      $cargs = @('-p'); if ($bypass) { $cargs += '--dangerously-skip-permissions' }
+      $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
+      $cargs = @('-p', '--output-format', 'stream-json', '--verbose'); if ($bypass) { $cargs += '--dangerously-skip-permissions' }
       if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) } else { $newId = [guid]::NewGuid().ToString(); $cargs += @('--session-id', $newId) }
     } else {
       $envs['CODEX_HOME'] = $dir; $outFile = [IO.Path]::GetTempFileName()
@@ -217,14 +262,19 @@ function Invoke-Runner($name) {
       if (Test-Path $sf) { $cargs = @('exec', 'resume') + $(if ($bypass) { $perm } else { @('-c', 'sandbox_mode="workspace-write"') }) + @('--skip-git-repo-check', '-o', $outFile, (Read-Text $sf).Trim(), '-') }
       else { $cargs = @('exec', '--json', '--skip-git-repo-check') + $perm + @('-o', $outFile, '-') } }
     $job = Start-Job -ScriptBlock {
-      param($cwd, $envs, $exe, $cargs, $prompt)
+      param($cwd, $envs, $exe, $cargs, $prompt, $live)
       Set-Location $cwd; foreach ($k in $envs.Keys) { Set-Item "env:$k" $envs[$k] }
-      $out = ($prompt | & $exe @cargs 2>&1 | Out-String); [pscustomobject]@{ Out = $out; Rc = $LASTEXITCODE } } -ArgumentList $cwd, $envs, $exe, $cargs, $prompt
+      if ($live) { $prompt | & $exe @cargs 2>> "$live.err" | ForEach-Object { Add-Content -LiteralPath $live -Value $_ -Encoding UTF8 }; [pscustomobject]@{ Out = ''; Rc = $LASTEXITCODE } }
+      else { $out = ($prompt | & $exe @cargs 2>&1 | Out-String); [pscustomobject]@{ Out = $out; Rc = $LASTEXITCODE } } } -ArgumentList $cwd, $envs, $exe, $cargs, $prompt, $(if ($kind -eq 'claude') { $live } else { $null })
     $rc = 0; $res = ''; $t0 = Get-Epoch; $nAlert = 0
     while ($true) {
       if (Wait-Job $job -Timeout 2) { $r = Receive-Job $job; $rc = [int]$r.Rc; $res = [string]$r.Out; break }
       Beat; $el = (Get-Epoch) - $t0
       if ($tmo -gt 0 -and $el -ge $tmo) { Stop-Job $job; $rc = 124; $res = 'timeout'; break }
+      if ($stall -gt 0 -and $st.activityAt -and ((Get-Epoch) - [int64]$st.activityAt) -ge $stall -and $st.stalledAt -ne $st.activityAt) {
+        $st.stalledAt = $st.activityAt; $quiet = [int](((Get-Epoch) - [int64]$st.activityAt) / 60); Log "no activity for $quiet min"
+        $adm = (Read-Text (Join-Path $B 'admin')).Trim()
+        if ($adm) { $script:me = $name; Send-Msg $adm "STALLED: worker '$name' has produced no activity for $quiet min (last: $($st.activity)). It may be hung or waiting on the provider. Check: agent status | agent logs $name" | Out-Null } }
       if ($alert -gt 0 -and $el -ge (($nAlert + 1) * $alert)) {
         $nAlert++; Log "still working after $([int]($el / 60)) min: $($st.order)"
         $adm = (Read-Text (Join-Path $B 'admin')).Trim()
@@ -235,15 +285,24 @@ function Invoke-Runner($name) {
       $last = Read-Text $outFile; Remove-Item $outFile -Force -ErrorAction SilentlyContinue
       if ($last.Trim()) { $res = $last }
     } elseif ($newId -and $rc -eq 0) { Write-Text $sf $newId }
+    $resetAt = $null
+    if ($kind -eq 'claude') {
+      $pl = Parse-Live; if ($pl.isErr -and $rc -eq 0) { $rc = 1 }; $resetAt = $pl.resetAt
+      if ($pl.result) { $res = $pl.result } else { $res = (Read-Text "$live.err") + "`n" + ((Read-Live | Select-Object -Last 20) -join "`n") } }
     $res = $res.Trim(); if ($res.Length -gt 6000) { $res = $res.Substring(0, 6000) }
     $verdict = Classify $rc $res
     switch ($verdict) {
-      'limit' { $res = "LIMIT: the provider's usage/rate limit was hit (it may reset later). Output: $res" }
+      'limit' {
+        if (-not $resetAt -and $res -match '\|(\d{10})') { $resetAt = [int64]$Matches[1] }
+        $now = Get-Epoch; $until = if ($resetAt -and $resetAt -gt $now) { $resetAt } else { $now + $limitPause }
+        if ($until -gt $now + 43200) { $until = $now + 43200 }; $st.pauseUntil = $until
+        $res = "LIMIT: the provider's usage/rate limit was hit. This worker pauses until $([DateTimeOffset]::FromUnixTimeSeconds($until).LocalDateTime.ToString('HH:mm')) and keeps queued orders; resend or reassign if urgent. Output: $res"
+        Log "limit hit: paused until $until" }
       'api' { $res = "API ERROR: the provider or the account failed (code $rc). Output: $res" }
       'timeout' { $res = "TIMEOUT after ${tmo}s: $res" }
       'error' { $res = "ERROR (code ${rc}): $res" } }
     if (-not $res) { $res = '(no output)' }
-    $st.status = 'idle'; $st.order = ''; $st.last_end = (Get-Epoch); $st.last_rc = $rc; $st.last_kind = $verdict; $st.since = $st.last_end; Write-State
+    $st.activity = ''; $st.activityAt = ''; $st.status = 'idle'; $st.order = ''; $st.last_end = (Get-Epoch); $st.last_rc = $rc; $st.last_kind = $verdict; $st.since = $st.last_end; Write-State
     $script:me = $name; Send-Msg $from $res | Out-Null
     Add-Content -Path $notes -Value "- $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) from $from [$cwd] rc=${rc}: $($body.Substring(0, [Math]::Min(100, $body.Length)) -replace '\s+', ' ')" -Encoding UTF8
     Log "replied to $from (rc=$rc)" } }

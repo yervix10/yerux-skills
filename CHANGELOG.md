@@ -19,5 +19,5 @@
 - `tests/run.sh`: runner tests with a fake `claude`.
 
 ### Windows
-- Ported: step menu, dry-run fix, worktrees, hook approval, state/heartbeat/alerts and error classification.
-- Not ported yet: live activity / `STALLED:`, limit pause, `agent wt`, `--check`.
+- Ported: step menu, dry-run fix, worktrees, hook approval, state/heartbeat/alerts, error classification, live activity and
+  `STALLED:`, limit pause, `agent wt` and `-Check`. The Windows code has not been run on Windows yet.
