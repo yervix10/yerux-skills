@@ -5,9 +5,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { parseClaude, parseCodex, redact, tail, selectEvents } = require('../../scripts/bridge-feed');
+const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
 test('parsea mensajes Claude, herramienta y resultado', () => {
   assert.equal(parseClaude(JSON.stringify({type:'user',timestamp:'2026-01-01T00:00:00Z',message:{content:[{type:'text',text:'hola'}]}}))[0].role,'order');
   assert.equal(parseClaude(JSON.stringify({type:'assistant',message:{content:[{type:'tool_use',name:'Read',input:{path:'a'}}]}}))[0].role,'tool');
+  assert.equal(parseClaude(JSON.stringify({type:'user',message:{content:[{type:'tool_result',tool_use_id:'t1',content:'done'}]}}))[0].role,'tool_result');
   assert.equal(parseClaude(JSON.stringify({type:'result',result:'fin'}))[0].role,'result');
 });
 test('parsea formato Codex', () => {
@@ -18,6 +20,7 @@ test('parsea formato Codex', () => {
   assert.deepEqual([order[0].role, assistant[0].role, tool[0].role], ['order','assistant','tool']);
   assert.equal(objectTool[0].text, '{"cmd":"pwd","args":["-P"]}');
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'message',role:'developer',content:[{text:'contexto'}]}})).length,0);
+  assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'custom_tool_call_output',name:'exec',output:'done'}}))[0].role,'tool_result');
 });
 test('elimina envoltorio del runner y ruido AGENTS', () => {
   const wrapped = "You are worker 'codex-2' in a team.\n\nOrder:\n# AGENTS.md instructions\nmetadata\n<environment_context>\nvariables\n</environment_context>\n\nOrder real: arregla esto";
@@ -34,4 +37,12 @@ test('límite toma los últimos N después de ordenar y tail ignora JSONL parcia
 test('redacta tokens e limita texto', () => {
   assert.match(redact('Bearer abc sk-1234567890 ghp_abcdefghijk KEY=secret'), /REDACTED/);
   assert.equal(parseClaude(JSON.stringify({type:'user',message:{content:'x'.repeat(2100)}}))[0].text.length,2000);
+});
+
+test('el feed agrupa herramientas en botones accesibles y conserva su expansión', () => {
+  assert.match(renderer, /Herramientas \(\$\{calls\.length\}\)/);
+  assert.match(renderer, /aria-controls', rowsId/);
+  assert.match(renderer, /aria-expanded', String\(toolGroupsOpen\.has\(key\)\)/);
+  assert.match(renderer, /bridge-tool-groups-open/);
+  assert.match(renderer, /toolGroupsOpen\.add\(key\)/);
 });

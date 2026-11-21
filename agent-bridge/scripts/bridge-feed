@@ -39,6 +39,7 @@ function parseClaude(line) {
     const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(x => x.type === 'text').map(x => x.text).join('\n') : '';
     const order = cleanOrder(text);
     if (order) out.push({ ts, role: 'order', text: trunc(order) });
+    if (Array.isArray(content)) for (const c of content) if (c.type === 'tool_result') out.push({ ts, role: 'tool_result', tool: trunc(c.tool_use_id || 'Herramienta'), text: trunc(printable(c.content)) });
   } else if (o.type === 'assistant') {
     for (const c of (Array.isArray(content) ? content : [])) {
       if (c.type === 'text' && c.text) out.push({ ts, role: 'assistant', text: trunc(c.text) });
@@ -57,7 +58,7 @@ function parseCodex(line) {
       if (p.role === 'user') { const order = cleanOrder(text); if (order) out.push({ ts, role: 'order', text: trunc(order) }); }
       else if (text) out.push({ ts, role: 'assistant', text: trunc(text) });
     } else if (p.type === 'function_call' || p.type === 'custom_tool_call') out.push({ ts, role: 'tool', tool: trunc(p.name || p.type), text: trunc(printable(p.arguments || p.input)) });
-    else if (p.type === 'custom_tool_call_output') out.push({ ts, role: 'tool', tool: trunc(p.name || 'resultado herramienta'), text: trunc(printable(p.output)) });
+    else if (p.type === 'custom_tool_call_output') out.push({ ts, role: 'tool_result', tool: trunc(p.name || 'Herramienta'), text: trunc(printable(p.output)) });
   } else if (o.type === 'event_msg' && ['task_started','task_complete'].includes(p.type)) out.push({ ts, role: p.type === 'task_started' ? 'system' : 'result', text: trunc(p.message || (p.type === 'task_started' ? 'Tarea iniciada' : 'Tarea completada')) });
   return out;
 }

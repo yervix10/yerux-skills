@@ -20,6 +20,8 @@ let detailName = null; let detailTimer = null; let detailPinned = true; let deta
 let activeAgent = null; let newestEventKey = ''; let newEventCount = 0; let pendingControl = null;
 const controlOptionsCache = new Map();
 let captureFeed = false;
+const toolGroupsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-groups-open') || '[]'));
+const toolDetailsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-details-open') || '[]'));
 
 const states = {
   admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
@@ -275,18 +277,44 @@ async function refreshDetail() {
   newestEventKey = nextKey;
   box.replaceChildren();
   let previousDay = '';
-  for (const event of events) {
+  for (let i = 0; i < events.length;) {
+    const event = events[i];
     const day = new Date(event.ts).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
     if (day !== previousDay) { box.append(element('div', 'feed-day', day)); previousDay = day; }
     const timestamp = new Date(event.ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-    if (event.role === 'tool') {
-      const row = element('div', 'feed-tool-row');
-      row.append(element('span', 'feed-tool-icon', '⚙'));
-      row.append(element('strong', 'feed-tool-name', event.tool || 'Herramienta'));
-      row.append(element('time', 'feed-time', timestamp));
-      if (event.text) row.append(element('span', 'feed-tool-summary', safeToolSummary(event.text)));
-      box.append(row); continue;
+    if (event.role === 'tool' || event.role === 'tool_result') {
+      const groupStart = i; const groupEvents = [];
+      while (i < events.length && ['tool', 'tool_result'].includes(events[i].role)) groupEvents.push(events[i++]);
+      const key = groupEvents.map(toolEventKey).join('~');
+      const rowsId = `feed-tool-rows-${groupStart}`;
+      const group = element('section', 'feed-tool-group');
+      const head = element('button', 'feed-tool-group-head'); head.type = 'button'; head.setAttribute('aria-controls', rowsId); head.setAttribute('aria-expanded', String(toolGroupsOpen.has(key)));
+      const calls = groupEvents.filter(item => item.role === 'tool');
+      const results = groupEvents.filter(item => item.role === 'tool_result');
+      const label = element('span', '', `Herramientas (${calls.length})`);
+      const counts = new Map(); for (const item of calls) counts.set(item.tool || 'Herramienta', (counts.get(item.tool || 'Herramienta') || 0) + 1);
+      const names = [...counts].map(([name, count]) => `${name}${count > 1 ? ` ×${count}` : ''}`).join(', ');
+      head.append(label, element('span', 'feed-tool-group-summary', names));
+      const inProgress = groupStart === 0 && snapshot.data?.state?.status === 'working';
+      if (inProgress) head.append(element('span', 'feed-tool-running', 'en curso…'));
+      head.append(element('span', 'feed-tool-chevron', '⌄'));
+      head.addEventListener('click', () => { if (toolGroupsOpen.has(key)) toolGroupsOpen.delete(key); else toolGroupsOpen.add(key); localStorage.setItem('bridge-tool-groups-open', JSON.stringify([...toolGroupsOpen])); refreshDetail(); });
+      const rows = element('div', 'feed-tool-rows'); rows.id = rowsId; rows.hidden = !toolGroupsOpen.has(key);
+      for (let toolIndex = 0; toolIndex < calls.length; toolIndex++) {
+        const item = calls[toolIndex]; const result = results[toolIndex];
+        const itemKey = toolEventKey(item); const detailId = `feed-tool-detail-${groupStart}-${toolIndex}`; const details = element('div', 'feed-tool-detail');
+        const row = element('button', 'feed-tool-row'); row.type = 'button'; row.setAttribute('aria-controls', detailId); row.setAttribute('aria-expanded', String(toolDetailsOpen.has(itemKey)));
+        row.append(element('strong', 'feed-tool-name', item.tool || 'Herramienta'));
+        row.append(element('span', 'feed-tool-summary', safeToolSummary(item.text || '')));
+        const running = inProgress && toolIndex === 0;
+        const failed = result && /error|fail|denied|timeout/i.test(result.text);
+        row.append(element('span', `feed-tool-status ${running ? 'is-running' : failed ? 'is-error' : 'is-ok'}`, running ? '…' : failed ? 'Error' : 'OK'));
+        row.addEventListener('click', () => { if (toolDetailsOpen.has(itemKey)) toolDetailsOpen.delete(itemKey); else toolDetailsOpen.add(itemKey); localStorage.setItem('bridge-tool-details-open', JSON.stringify([...toolDetailsOpen])); refreshDetail(); });
+        const full = element('pre', 'feed-tool-full', `${safeToolSummary(item.text || '')}${result ? `\n\nResultado:\n${result.text}` : ''}`); full.id = detailId; full.hidden = !toolDetailsOpen.has(itemKey); details.append(row, full); rows.append(details);
+      }
+      group.append(head, rows); box.append(group); continue;
     }
+    i++;
     const role = event.role === 'order' ? 'admin' : event.role;
     const row = element('article', `feed-message feed-${role}`);
     row.dataset.eventKey = `${event.ts}|${event.role}|${event.text}`;
@@ -304,6 +332,7 @@ async function refreshDetail() {
   else if (oldHeight) box.scrollTop = oldTop + (box.scrollHeight - oldHeight);
   reportLayout(captureFeed);
 }
+function toolEventKey(event) { return `${event.ts}|${event.tool || ''}|${event.text || ''}`; }
 function safeToolSummary(text) {
   try { const value = JSON.parse(text); if (value && typeof value === 'object') return Object.entries(value).slice(0, 3).map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · '); } catch {}
   return text;
