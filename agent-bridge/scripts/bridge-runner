@@ -19,6 +19,8 @@ TMO="${BRIDGE_TASK_TIMEOUT:-0}"
 # Bypass mode (no permission prompts) by default so the admin's orders do not fail. BRIDGE_BYPASS=0 disables it.
 BYPASS="${BRIDGE_BYPASS:-$(sed -n 's/^BYPASS=//p' "$B/config" 2>/dev/null | head -1)}"; BYPASS="${BYPASS:-1}"
 CLAUDE_PERM=(); CODEX_PERM_NEW=(-s workspace-write); CODEX_PERM_RES=(-c sandbox_mode=\"workspace-write\")
+# BRIDGE_BYPASS=safe: Claude may edit files but not run arbitrary commands without approval; Codex stays in its workspace-write sandbox.
+if [ "$BYPASS" = safe ]; then CLAUDE_PERM=(--permission-mode acceptEdits); fi
 if [ "$BYPASS" = 1 ]; then CLAUDE_PERM=(--dangerously-skip-permissions); CODEX_PERM_NEW=(--dangerously-bypass-approvals-and-sandbox); CODEX_PERM_RES=(--dangerously-bypass-approvals-and-sandbox); fi
 log "bypass=$BYPASS"
 # ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
@@ -28,10 +30,17 @@ LIVE="$B/logs/$name.live"; S_ACT=""; S_ACT_AT=""; PAUSE_UNTIL=0; STALL="${BRIDGE
 sw() { printf 'status=%s\nsince=%s\nbeat=%s\norder=%s\nlast_end=%s\nlast_rc=%s\nlast_kind=%s\nactivity=%s\nactivity_at=%s\npause_until=%s\n' "$S_STATUS" "$S_SINCE" "$(date +%s)" "$S_ORDER" "$S_END" "$S_RC" "$S_KIND" "$S_ACT" "$S_ACT_AT" "$PAUSE_UNTIL" > "$ST.tmp" 2>/dev/null && mv "$ST.tmp" "$ST"; }
 # act: last thing a Claude worker did (tool call) and when, read from its live stream-json log
 act() { [ -s "$LIVE" ] || return 0
+  if [ "$kind" = codex ]; then
+    S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="item.started" or .type=="item.completed")|.item|select(.type!="agent_message" and .type!="reasoning")|"\(.type) \((.command // .path // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  else
   S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="assistant")|.message.content[]?|select(.type=="tool_use")|"\(.name) \((.input.command // .input.file_path // .input.pattern // .input.description // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  fi
   S_ACT_AT="$(stat -c %Y "$LIVE" 2>/dev/null || stat -f %m "$LIVE" 2>/dev/null)"; return 0; }
-beat() { local n; n=$(date +%s); [ $((n - LASTBEAT)) -ge 5 ] && { LASTBEAT=$n; [ "$S_STATUS" = working ] && [ "$kind" = claude ] && act; sw; }; return 0; }
-notify_admin() { local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
+beat() { local n; n=$(date +%s); [ $((n - LASTBEAT)) -ge 5 ] && { LASTBEAT=$n; [ "$S_STATUS" = working ] && act; sw; }; return 0; }
+notify_desktop() { [ "${BRIDGE_NOTIFY:-1}" = 0 ] && return 0
+  if command -v notify-send >/dev/null 2>&1; then notify-send "agent-bridge: $name" "$1" >/dev/null 2>&1
+  elif command -v osascript >/dev/null 2>&1; then osascript -e "display notification \"$(printf '%s' "$1" | tr -d '"\\')\" with title \"agent-bridge: $name\"" >/dev/null 2>&1; fi; return 0; }
+notify_admin() { notify_desktop "${1:0:140}"; local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
 # supervise <pid>: waits for the order's process, keeps the heartbeat and warns the admin every $ALERT seconds (it never kills it)
 supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
   while kill -0 "$pid" 2>/dev/null; do sleep 2; beat; el=$(( $(date +%s) - t0 ))
@@ -42,6 +51,14 @@ supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
       log "still working after $((el / 60)) min: $S_ORDER"
       notify_admin "ALERT: worker '$name' has been on the same order for $(if [ $el -ge 120 ]; then echo "$((el / 60)) min"; else echo "${el}s"; fi) and has not replied yet (still running, not killed). Order: $S_ORDER. Check: agent status | agent logs $name | agent reset $name"; fi; done
   wait "$pid"; local rc=$?; CHILD=""; return $rc; }
+# pick_worker: an idle runner (other than this one and the admin) that can take over an order; empty when none
+pick_worker() { local t; for t in $(awk -F= '{print $2}' "$B/names.conf" 2>/dev/null); do
+    [ "$t" = "$name" ] && continue; [ "$t" = "$(cat "$B/admin" 2>/dev/null)" ] && continue
+    [ -f "$B/runs/$t.pid" ] && kill -0 "$(cat "$B/runs/$t.pid")" 2>/dev/null || continue
+    [ "$(sed -n 's/^status=//p' "$B/runs/$t.state" 2>/dev/null | head -1)" = idle ] && { echo "$t"; return; }; done; }
+reassign() { local t="$1" f; mkdir -p "$B/inbox/$t"; f="$B/inbox/$t/$(date +%Y%m%dT%H%M%S).$$-de-$from.msg"
+  printf 'From: %s\nTo: %s\nDate: %s\nCwd: %s\n\n[reassigned from %s: it hit a usage limit]\n%s\n' "$from" "$t" "$(date '+%F %T')" "$orig_cwd" "$name" "$body" > "$f.tmp" && mv "$f.tmp" "$f"; }
+REASSIGN="${BRIDGE_REASSIGN:-$(sed -n 's/^REASSIGN=//p' "$B/config" 2>/dev/null | head -1)}"; REASSIGN="${REASSIGN:-0}"
 # classify <rc> <text> -> ok | limit | api | timeout | error
 classify() { local rc="$1" low; low="$(printf '%s' "$2" | tr 'A-Z' 'a-z')"
   [ "$rc" = 124 ] && { echo timeout; return; }
@@ -79,7 +96,7 @@ while true; do
   [ -n "$f" ] || { beat; sleep 1; continue; }
   sleep 0.3
   base="$(basename "$f" .msg)"; from="${base##*-de-}"
-  cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"; cwd="$(worktree_for "$cwd")"
+  cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"; orig_cwd="$cwd"; cwd="$(worktree_for "$cwd")"
   body="$(awk 'f{print} /^$/ && !f{f=1}' "$f")"
   mv "$f" "$B/read/$name/"
   if [ "$from" != "$(cat "$B/admin" 2>/dev/null)" ]; then log "ignored (not from the admin): from $from"; continue; fi
@@ -104,15 +121,17 @@ $body"
     [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 2000 "$LIVE"; } > "$tmp" 2>/dev/null
     [ "$new" = 1 ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
   else
-    out="$(mktemp)"
+    out="$(mktemp)"; : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     if [ -f "$sf" ]; then
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 & supervise $! || rc=$?
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume --json "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     else
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 & supervise $! || rc=$?
-      id="$(grep -o -m1 '"\(thread_id\|session_id\|conversation_id\)":"[^"]*"' "$tmp.log" | head -1 | cut -d'"' -f4)"
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+      id="$(jq -r 'select(.type=="thread.started")|.thread_id' "$LIVE" 2>/dev/null | head -1)"
       [ "$rc" = 0 ] && [ -n "$id" ] && echo "$id" > "$sf"
     fi
-    cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || tail -c 2000 "$tmp.log" > "$tmp"; rm -f "$out" "$tmp.log"
+    errs="$(jq -r '(select(.type=="error")|.message), (select(.type=="turn.failed")|.error.message)' "$LIVE" 2>/dev/null | tr '\n' ' ')"
+    [ -n "$errs" ] && [ "$rc" = 0 ] && ! [ -s "$out" ] && rc=1
+    cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || { printf '%s\n' "$errs"; cat "$LIVE.err"; } | tail -c 2000 > "$tmp"; rm -f "$out"
   fi
   res="$(head -c 6000 "$tmp")"; rm -f "$tmp"
   verdict="$(classify "$rc" "$res")"
@@ -122,11 +141,14 @@ $body"
       now=$(date +%s); if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt "$now" ] 2>/dev/null; then PAUSE_UNTIL=$RESET_AT; else PAUSE_UNTIL=$((now + LIMIT_PAUSE)); fi
       [ $PAUSE_UNTIL -gt $((now + 43200)) ] && PAUSE_UNTIL=$((now + 43200))
       res="LIMIT: the provider's usage/rate limit was hit. This worker pauses until $(date -d "@$PAUSE_UNTIL" +%H:%M 2>/dev/null || date -r "$PAUSE_UNTIL" +%H:%M) and keeps queued orders; resend or reassign if urgent. Output: $res"
-      log "limit hit: paused until $PAUSE_UNTIL";;
+      log "limit hit: paused until $PAUSE_UNTIL"
+      if [ "$REASSIGN" = 1 ] && other="$(pick_worker)" && [ -n "$other" ]; then reassign "$other"; res="$res
+Order reassigned to '$other' (idle); it will reply to you directly."; log "order reassigned to $other"; fi;;
     api) res="API ERROR: the provider or the account failed (code $rc). Output: $res";;
     timeout) res="TIMEOUT after ${TMO}s: $res";;
     error) res="ERROR (code $rc): $res";;
   esac
+  case "$verdict" in limit|api|error|timeout) notify_desktop "$verdict: ${res:0:120}";; esac
   RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END; sw
   [ -n "$res" ] || res="(no output)"
   BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$from" "$res" >/dev/null

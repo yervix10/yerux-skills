@@ -26,7 +26,10 @@ ignored via `.git/info/exclude`). Disable with `BRIDGE_WORKTREE=0`. Manage them 
 
 Monitoring: `agent status` (idle / WORKING + last tool / LIMITED / NO HEARTBEAT). Env: `BRIDGE_ALERT` (seconds, default 1800),
 `BRIDGE_STALL` (no-activity seconds, default 600), `BRIDGE_LIMIT_PAUSE` (default 300). Check the install with `./install.sh --check`.
-Tests: `tests/run.sh`.
+`agent dashboard` shows every worker live. Desktop notifications on alerts/limits/errors (`BRIDGE_NOTIFY=0` to mute).
+`BRIDGE_REASSIGN=1` (or `REASSIGN=1` in config): when a worker hits a usage limit its order goes to an idle worker.
+`./install.sh --safe` / `BRIDGE_BYPASS=safe`: workers can edit files but Claude cannot run arbitrary commands unprompted.
+`./install.sh --check --fix` repairs only the accounts that fail the check. Tests: `tests/run.sh` (also run by CI).
 
 ## Windows
 
