@@ -45,6 +45,7 @@ On setups that keep a per-session status line cache (`~/.cache/lordos/claude/*.j
 Runners compact their context before an order once it reaches `COMPACT_AT` % (default 40, `0` disables; set in `~/.claude-bridge/config` or `BRIDGE_COMPACT_AT`).
 Codex data comes from its latest session file; Kiro data comes from its session history; Claude data from the worker's live log, or from the real status line JSON if you install
 with `./install.sh --statusline` (wraps the account's status line, which keeps looking the same; `--uninstall` restores it). Desktop notifications on alerts/limits/errors (`BRIDGE_NOTIFY=0` to mute).
+Claude context is computed from each assistant usage event using the model's cached context window, before a turn emits its final `result`; when a live log has no assistant event yet, the last measured percentage and its age remain visible. The `claude-sonnet-5-5` and `claude-opus-5-5` fallback windows are 1,000,000 tokens.
 `BRIDGE_REASSIGN=1` (or `REASSIGN=1` in config): when a worker hits a usage limit its order goes to an idle worker.
 `./install.sh --safe` / `BRIDGE_BYPASS=safe`: workers can edit files but Claude cannot run arbitrary commands unprompted.
 `./install.sh --check --fix` repairs only the accounts that fail the check. Tests: `tests/run.sh` (also run by CI).

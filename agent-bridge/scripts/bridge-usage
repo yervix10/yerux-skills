@@ -42,10 +42,22 @@ case "$kind" in
     elif [ -s "$f" ]; then
       at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
       # Fold the live transcript in one jq process; separate jq|tail|cut pipelines repeatedly parsed multi-megabyte logs.
-      row="$(jq -sr '[.[]|select(.type=="system" and .subtype=="init")] as $init | [.[]|select(.type=="rate_limit_event")] as $rates | [.[]|select(.type=="assistant" and .message.usage)] as $assistants | [.[]|select(.type=="result")] as $results | ($rates[-1].rate_limit_info.unifiedWindows // {}) as $windows | ($assistants[-1].message.usage // {}) as $usage | (($results[-1].modelUsage // {})|to_entries[0].value.contextWindow // "-") as $window | [($init[-1].model // "-"),($init[-1].cwd // "-"),(if $windows.five_hour.utilization == null then "-" else (($windows.five_hour.utilization*100)|floor|tostring) end),(if $windows.seven_day.utilization == null then "-" else (($windows.seven_day.utilization*100)|floor|tostring) end),($windows.five_hour.resetsAt // "-"),($windows.seven_day.resetsAt // "-"),((($usage.input_tokens // 0)+($usage.cache_read_input_tokens // 0)+($usage.cache_creation_input_tokens // 0))|tostring),($window|tostring)]|@tsv' "$f" 2>/dev/null)"
+      row="$(jq -sr '[.[]|select(.type=="system" and .subtype=="init")] as $init | [.[]|select(.type=="rate_limit_event")] as $rates | [.[]|select(.type=="assistant" and .message.usage)] as $assistants | [.[]|select(.type=="result")] as $results | ($rates[-1].rate_limit_info.unifiedWindows // {}) as $windows | ($assistants[-1].message.usage // {}) as $usage | (($results[-1].modelUsage // {})|to_entries[0].value.contextWindow // "-") as $window | [($init[-1].model // (($results[-1].modelUsage // {})|keys[0]) // "-"),($init[-1].cwd // "-"),(if $windows.five_hour.utilization == null then "-" else (($windows.five_hour.utilization*100)|floor|tostring) end),(if $windows.seven_day.utilization == null then "-" else (($windows.seven_day.utilization*100)|floor|tostring) end),($windows.five_hour.resetsAt // "-"),($windows.seven_day.resetsAt // "-"),(if ($assistants|length)>0 then ((($usage.input_tokens // 0)+($usage.cache_read_input_tokens // 0)+($usage.cache_creation_input_tokens // 0))|tostring) else "-" end),($window|tostring)]|@tsv' "$f" 2>/dev/null)"
       IFS=$'\t' read -r model cwd h5 wk h5r wkr used win <<< "$row"
       for v in model cwd h5 wk h5r wkr used win; do [ "${!v}" = - ] && printf -v "$v" ''; done
-      [ -n "$used" ] && [ -n "$win" ] && ctx=$((used * 100 / win))
+      win_file="$B/usage/$name.window"; mkdir -p "$B/usage"
+      if [[ "$win" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ]; then
+        jq -n --arg model "$model" --argjson window "$win" '{model:$model,window:$window}' > "$win_file.tmp.$$" && mv "$win_file.tmp.$$" "$win_file"
+      else
+        saved_model="$(jq -r '.model // empty' "$win_file" 2>/dev/null)"; saved_window="$(jq -r '.window // empty' "$win_file" 2>/dev/null)"
+        [ -n "$saved_window" ] && { [ -z "$model" ] || [ "$saved_model" = "$model" ]; } && win="$saved_window"
+        if [ -z "$win" ]; then case "$model" in claude-sonnet-5-5|claude-opus-5-5) win=1000000;; esac; fi
+      fi
+      if [[ "$win" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ]; then
+        jq -n --arg model "$model" --argjson window "$win" '{model:$model,window:$window}' > "$win_file.tmp.$$" && mv "$win_file.tmp.$$" "$win_file"
+      fi
+      ctxwin="$win"
+      [ -n "$used" ] && [[ "$win" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && ctx=$((used * 100 / win))
     fi;;
   kiro)
     sess_file=""; sess="$(find "$B/sessions/$name" -maxdepth 1 -type f ! -name '*.cwd' -print 2>/dev/null | head -1)"; sess="$(cat "$sess" 2>/dev/null)"
