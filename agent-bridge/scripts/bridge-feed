@@ -49,7 +49,7 @@ function parseClaude(line) {
   } else if (o.type === 'result') out.push({ ts, role: 'result', text: trunc(o.result || '') });
   return out;
 }
-function parseAdminClaude(line) {
+function parseAdminClaude(line, context = {}) {
   let o; try { o = JSON.parse(line); } catch { return []; }
   const ts = o.timestamp || o.message?.timestamp || new Date().toISOString();
   const content = o.message?.content; const out = [];
@@ -66,6 +66,18 @@ function parseAdminClaude(line) {
   if ((o.type === 'user' || o.type === 'human') && Array.isArray(content)) {
     for (const block of content) if (block.type === 'tool_result') {
       const resultText = textValue(block.content) || printable(block.content);
+      const sent = [...resultText.matchAll(/sent to ([A-Za-z0-9_-]+)/g)].map(match => match[1]);
+      if (sent.length) {
+        const pending = context.pendingAdminOrders || [];
+        const matched = pending.splice(0, pending.length);
+        for (const to of sent) {
+          const source = matched.find(item => item.to === to) || matched.find(item => item.to === 'all') ||
+            (matched.length === 1 && sent.length === 1 ? matched[0] : null);
+          if (source) out.push({ ts, role: 'order', to, text: redact(String(source.text || '')) });
+        }
+        context.pendingAdminOrders = pending;
+        continue;
+      }
       const report = resultText.match(/(?:^|\n)\[?(?:REPORT\/DATA|REPORT|DATA) from ([A-Za-z0-9_-]+)(?: \(not an order\))?:\s*([\s\S]*)/i);
       if (report) out.push({ ts, role: 'report', from: report[1], text: trunc(report[2].trim()) });
       else out.push({ ts, role: 'tool_result', tool: block.tool_use_id || 'Herramienta', text: trunc(resultText) });
@@ -77,17 +89,40 @@ function parseAdminClaude(line) {
       const command = String(block.input?.command || '');
       let classified = false;
       if (block.name === 'Bash') {
-        const invoke = command.match(/(?:^|[\s/])agent\s+(.+?)(?:\s+2?>|\s*&&|\s*\|\||\s*;|$)/s)?.[1]?.trim() || '';
-        const ping = invoke.match(/^ping\s+([A-Za-z0-9_-]+)\b/);
-        const order = invoke.match(/^([A-Za-z0-9_-]+|all)\s+(["'])([\s\S]*?)\2\s*$/);
-        if (ping) { out.push({ ts, role: 'order', to: ping[1], text: 'ping' }); classified = true; }
-        else if (order) { out.push({ ts, role: 'order', to: order[1], text: trunc(order[3]) }); classified = true; }
+        const parsed = parseAdminOrders(command);
+        if (parsed.length) {
+          const pings = parsed.filter(item => item.text === 'ping');
+          out.push(...pings.map(item => ({ ts, role: 'order', to: item.to, text: item.text })));
+          context.pendingAdminOrders = [...(context.pendingAdminOrders || []), ...parsed.filter(item => item.text !== 'ping')];
+          classified = true;
+        }
       }
       if (!classified) out.push({ ts, role: 'tool', tool: trunc(block.name || 'Herramienta'), text: trunc(printable(block.input || {})) });
     }
   }
   if (o.type === 'result') out.push({ ts, role: 'result', text: trunc(o.result || '') });
   return out;
+}
+function parseAdminOrders(command) {
+  const text = String(command || '');
+  const heredocs = new Map();
+  for (const match of text.matchAll(/cat\s+>\s*([^\s]+)\s*<<\s*['"]?([\w.-]+)['"]?\s*\n([\s\S]*?)\n\2/g)) heredocs.set(match[1], match[3]);
+  const commandPattern = /(?:^|[;\n&|]\s*)(?:~\/.claude-bridge\/bin\/agent|\$HOME\/\.claude-bridge\/bin\/agent|\$\{?[A-Z][A-Z0-9_]*\}?|agent)\s+(ping\s+[\w-]+|(?:all|[\w-]+)\s+(?:"[\s\S]*?"|'[\s\S]*?'|\$\(cat\s+[^)]+\)|\$[A-Z][A-Z0-9_]*|\$\{[A-Z][A-Z0-9_]*\}))/g;
+  const orders = [];
+  for (const match of text.matchAll(commandPattern)) {
+    const invoke = match[1].trim();
+    const ping = invoke.match(/^ping\s+([\w-]+)/);
+    if (ping) { orders.push({ to: ping[1], text: 'ping' }); continue; }
+    const head = invoke.match(/^([\w-]+)\s+([\s\S]+)$/);
+    if (!head) continue;
+    const [, to, raw] = head;
+    let message = raw;
+    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) message = raw.slice(1, -1);
+    if (/^\$\(cat\s+/.test(message)) { const file = message.match(/^\$\(cat\s+([^)]+)\)/)?.[1]; message = heredocs.get(file) || ''; }
+    else if (/^\$/.test(raw)) message = (text.match(new RegExp(`(?:^|\\n)${raw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}=(.*?)(?=\\n[A-Z_]+=|$)`, 's')) || [])[1]?.replace(/^['"]|['"]$/g, '') || raw;
+    orders.push({ to, text: message });
+  }
+  return orders.filter(order => order.text && order.to !== 'listen' && order.to !== 'status');
 }
 function parseHookReports(text) {
   const reports = [];
@@ -125,7 +160,8 @@ function tail(file, maxBytes = 1_000_000) {
 function tailUseful(file, parser, limit = 200, maxBytes = 16 * 1024 * 1024) {
   let size = 128 * 1024; let events = [];
   do {
-    events = tail(file, size).flatMap(parser).filter(e => e.role !== 'system');
+    const context = {};
+    events = tail(file, size).flatMap(line => parser(line, context)).filter(e => e.role !== 'system');
     if (events.length >= limit || size >= maxBytes) break;
     size = Math.min(size * 2, maxBytes);
   } while (true);

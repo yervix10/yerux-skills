@@ -25,12 +25,15 @@ test('parsea formato Codex', () => {
 test('lee transcript anonimizado del admin y clasifica órdenes, reportes, conversación y ping', () => {
   const fixture = path.join(__dirname, 'fixtures/admin-transcript-anonymized.jsonl');
   const events = tailUseful(fixture, parseAdminClaude, 200);
-  assert.deepEqual(events.map(({ role }) => role), ['order', 'report', 'admin', 'order', 'report', 'report']);
+  assert.deepEqual(events.map(({ role }) => role), ['order', 'report', 'admin', 'order', 'report', 'report', 'order', 'order']);
   assert.deepEqual([events[0].to, events[0].text], ['codex-3', 'Implementa el fix del panel']);
   assert.deepEqual([events[1].from, events[1].text], ['codex-3', 'Hecho; commit abc1234']);
   assert.equal(events[3].text, 'ping');
   assert.equal(events[4].text, 'Validación terminada');
   assert.equal(events[5].text, 'La tarea de interfaz quedó lista.');
+  assert.deepEqual(events.slice(6).map(({ to, text }) => [to, text]), [
+    ['codex-2', 'Primera línea\nsegunda línea'], ['codex-1', 'Texto completo\ncon varias líneas'],
+  ]);
 });
 test('feed del admin usa transcript_path de usage y límite por defecto de 200', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-admin-feed-'));
@@ -42,9 +45,9 @@ test('feed del admin usa transcript_path de usage y límite por defecto de 200',
   const previous = process.env.BRIDGE_DIR; process.env.BRIDGE_DIR = root;
   try {
     const result = feed('claude-1');
-    assert.equal(result.events.length, 6);
+    assert.equal(result.events.length, 8);
     assert.equal(result.events[0].role, 'order');
-    assert.equal(result.events.at(-1).role, 'report');
+    assert.equal(result.events.at(-1).role, 'order');
   } finally {
     if (previous === undefined) delete process.env.BRIDGE_DIR; else process.env.BRIDGE_DIR = previous;
     fs.rmSync(root, { recursive: true, force: true });
