@@ -265,7 +265,9 @@ async function createWidget() {
     if (!fromWidget(event) || !Number.isSafeInteger(height) || typeof collapsed !== 'boolean') return;
     const bounds = window.getBounds();
     const area = screen.getDisplayMatching(bounds).workArea;
-    const targetHeight = Math.max(minHeight, Math.min(height, area.height));
+    // Leave room for panels/docks the compositor doesn't report; the list scrolls past this cap.
+    const maxHeight = Math.max(minHeight, Math.floor(Math.min(area.height * 0.85, area.height - 90)));
+    const targetHeight = Math.max(minHeight, Math.min(height, maxHeight));
     const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - targetHeight));
     if (bounds.height !== targetHeight || bounds.y !== y) {
       if (bounds.y !== y) window.setBounds({ y, height: targetHeight });
