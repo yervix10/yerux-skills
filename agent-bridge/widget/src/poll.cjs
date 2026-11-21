@@ -9,9 +9,17 @@ const { parseDashboard } = require('./dashboard.cjs');
 const run = promisify(execFile);
 
 async function fetchDashboard(signal) {
+  const bridgeRoot = path.resolve(process.env.BRIDGE_DIR || path.join(homedir(), '.claude-bridge'));
   const command = process.env.BRIDGE_WIDGET_CMD ||
-    (process.platform === 'win32' ? '' : path.join(homedir(), '.claude-bridge', 'bin', 'agent'));
+    (process.platform === 'win32' ? '' : path.join(bridgeRoot, 'bin', 'agent'));
   if (!command) throw new Error('Configura BRIDGE_WIDGET_CMD');
+
+  if (process.platform !== 'win32') {
+    const relative = path.relative(bridgeRoot, path.resolve(command));
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error('BRIDGE_WIDGET_CMD debe apuntar dentro de ~/.claude-bridge');
+    }
+  }
 
   const javascript = /\.[cm]?js$/i.test(command);
   const args = ['dashboard', '--json'];

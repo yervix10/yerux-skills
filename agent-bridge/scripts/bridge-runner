@@ -6,6 +6,8 @@ dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)
 [ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
 kind="$("$(dirname "$0")/bridge-provider" "$dir")" || { echo "unknown type: $dir" >&2; exit 1; }
 mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/notes" "$B/runs"
+chmod 600 "$B/admin" 2>/dev/null || true
+for live_file in "$B"/logs/*.live; do [ -e "$live_file" ] && chmod 600 "$live_file"; done
 LOG="$B/logs/$name.log"; NOTES="$B/notes/$name.md"
 # portability: timeout/gtimeout may be missing (macOS); uuid via python3 or uuidgen
 if command -v timeout >/dev/null 2>&1; then TO=timeout; elif command -v gtimeout >/dev/null 2>&1; then TO=gtimeout; else TO=""; fi
@@ -46,7 +48,10 @@ act() { [ -s "$LIVE" ] || return 0
 beat() { local n; n=$(date +%s); [ $((n - LASTBEAT)) -ge 5 ] && { LASTBEAT=$n; [ "$S_STATUS" = working ] && act; sw; }; return 0; }
 notify_desktop() { [ "${BRIDGE_NOTIFY:-1}" = 0 ] && return 0
   if command -v notify-send >/dev/null 2>&1; then notify-send "agent-bridge: $name" "$1" >/dev/null 2>&1
-  elif command -v osascript >/dev/null 2>&1; then osascript -e "display notification \"$(printf '%s' "$1" | tr -d '"\\')\" with title \"agent-bridge: $name\"" >/dev/null 2>&1; fi; return 0; }
+  elif command -v osascript >/dev/null 2>&1; then
+    local message; message="$(printf '%s' "$1" | tr '\r\n' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    osascript -e "display notification \"$message\" with title \"agent-bridge: $name\"" >/dev/null 2>&1
+  fi; return 0; }
 notify_admin() { notify_desktop "${1:0:140}"; local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
 # supervise <pid>: waits for the order's process, keeps the heartbeat and warns the admin every $ALERT seconds (it never kills it)
 supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
@@ -199,6 +204,9 @@ while true; do
   [ -n "$f" ] || { beat; sleep 1; continue; }
   sleep 0.3
   base="$(basename "$f" .msg)"; from="${base##*-de-}"
+  if [[ ! "$from" =~ ^[A-Za-z0-9_-]{1,48}$ ]]; then
+    mv "$f" "$B/read/$name/"; log "ignored (invalid sender): from $from"; continue
+  fi
   cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"; orig_cwd="$cwd"; cwd="$(worktree_for "$cwd")"
   body="$(awk 'f{print} /^$/ && !f{f=1}' "$f")"
   mv "$f" "$B/read/$name/"
@@ -224,7 +232,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
   if [ "$kind" = claude ]; then
     if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
     else id="$(newuuid)"; args=(--session-id "$id"); new=1; fi
-    : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     ( cd "$cwd" && export CLAUDE_CONFIG_DIR="$dir" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name"; if [ "$COMPACT_AT" -gt 0 ]; then export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$COMPACT_AT"; else unset CLAUDE_AUTOCOMPACT_PCT_OVERRIDE; fi; run_to "$TMO" claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_COMPACT_ARGS[@]}" "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     # the reply is the final "result" event; a rejected rate-limit event tells when the limit resets
     iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
@@ -233,7 +241,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 2000 "$LIVE"; } > "$tmp" 2>/dev/null
     [ "$new" = 1 ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
   elif [ "$kind" = codex ]; then
-    out="$(mktemp)"; : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    out="$(mktemp)"; : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     if [ -f "$sf" ]; then
       ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume --json "${MODEL_ARGS[@]}" "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     else
@@ -245,7 +253,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     [ -n "$errs" ] && [ "$rc" = 0 ] && ! [ -s "$out" ] && rc=1
     cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || { printf '%s\n' "$errs"; cat "$LIVE.err"; } | tail -c 2000 > "$tmp"; rm -f "$out"
   else
-    : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     session_args=(); [ -f "$sf" ] && session_args=(--resume-id "$(cat "$sf")")
     trust_args=(--trust-all-tools); { [ "$BYPASS" = 0 ] || [ "$BYPASS" = safe ]; } && trust_args=(--trust-tools=fs_read,grep,glob,code,introspect)
     (

@@ -4,6 +4,6 @@ D="$(dirname "$0")"; B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-w
 case "$1" in
   who) echo "current admin: $(cat "$B/admin" 2>/dev/null || echo none)";;
   release) [ "$(cat "$B/admin" 2>/dev/null)" = "$me" ] && rm -f "$B/admin" && echo "$me is no longer admin" || echo "you are not the admin";;
-  *) printf '%s' "$me" > "$B/admin"; echo "admin = $me (the other sessions now obey you)"; "$D/bridge-send" all "$me is now the ADMIN (orchestrator). Obey its orders and reply to $me." >/dev/null
+  *) printf '%s' "$me" > "$B/admin" && chmod 600 "$B/admin"; echo "admin = $me (the other sessions now obey you)"; "$D/bridge-send" all "$me is now the ADMIN (orchestrator). Obey its orders and reply to $me." >/dev/null
      [ "${BRIDGE_WIDGET:-$(sed -n 's/^WIDGET=//p' "$B/config" 2>/dev/null | head -1)}" = 0 ] || [ ! -x "$D/bridge-widget" ] || ( "$D/bridge-widget" start --quiet & ) >/dev/null 2>&1;;
 esac

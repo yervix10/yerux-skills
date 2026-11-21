@@ -85,6 +85,15 @@ test('redacta tokens e limita texto', () => {
   assert.equal(parseClaude(JSON.stringify({type:'user',message:{content:'x'.repeat(2100)}}))[0].text.length,2000);
 });
 
+test('redacta credenciales AWS, GitHub PAT, URLs PostgreSQL y api_key en minúsculas', () => {
+  const clean = redact('AKIA1234567890ABCDEF github_pat_abcdefgh123456 postgres://alice:s3cret@db.example/api api_key=hidden apikey=alsohidden');
+  assert.doesNotMatch(clean, /AKIA1234567890ABCDEF|github_pat_abcdefgh123456|alice:s3cret|api_key=hidden|apikey=alsohidden/);
+  assert.match(clean, /\[REDACTED TOKEN\]/);
+  assert.match(clean, /postgres:\/\/\[REDACTED\]@db\.example/);
+  assert.match(clean, /api_key=\[REDACTED\]/);
+  assert.match(clean, /apikey=\[REDACTED\]/);
+});
+
 test('el feed agrupa herramientas en botones accesibles y conserva su expansión', () => {
   assert.match(renderer, /Herramientas \(\$\{calls\.length\}\)/);
   assert.match(renderer, /aria-controls', rowsId/);

@@ -30,6 +30,10 @@ function cleanOrder(value) {
 function redact(s) {
   return s.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED KEY]')
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]').replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,})\b/g, '[REDACTED TOKEN]')
+    .replace(/\b(?:AKIA)[A-Z0-9]{16}\b/g, '[REDACTED TOKEN]')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{8,}\b/g, '[REDACTED TOKEN]')
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s/:@]+:[^\s/@]+@/gi, '$1[REDACTED]@')
+    .replace(/\b(api_key|apikey)\s*=\s*[^\s,;]+/gi, '$1=[REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)\s*=\s*[^\s,;]+/gi, '$1=[REDACTED]');
 }
 function parseClaude(line) {

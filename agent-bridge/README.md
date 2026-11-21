@@ -11,6 +11,10 @@ Pin a version with `AGENT_BRIDGE_REF=<tag>`. On Windows pass options with `$env:
 
 Connects Claude Code, Codex, and Kiro CLI sessions from different accounts on the same machine.
 
+### Security boundary
+
+The bridge trusts processes running under the same operating-system UID. A process with that UID can impersonate the configured admin; this is a known trust boundary, not an authentication mechanism. Keep `~/.claude-bridge` private (`0700`); the installer sets this mode. Admin identity and live runner logs are stored with mode `0600`.
+
 The desktop widget shows a read-only activity feed when you select an agent card. It refreshes while open and includes the recent admin order, assistant messages, tool actions, and result. From the CLI, use `agent feed <name> [--json] [--limit N] [--since TS]`. The limit applies to the newest events after timestamp sorting; incomplete trailing JSONL records and runner prompt wrappers are ignored. Secret-like values are redacted and event text is capped at 2,000 characters.
 
 The detail-panel capture can be refreshed from the widget folder with `./node_modules/.bin/electron . --capture --capture-feed`; it selects a current dashboard agent and writes `docs/screenshot.png`.

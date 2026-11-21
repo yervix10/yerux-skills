@@ -27,10 +27,10 @@ Arrastra la ventana por el tirador del encabezado. Haz doble clic sobre el encab
 
 ## Fuente de datos
 
-En Linux y macOS el widget ejecuta `~/.claude-bridge/bin/agent dashboard --json`. Para usar otra fuente, asigna a `BRIDGE_WIDGET_CMD` la ruta de un ejecutable o de un script de Node.js (`.js`, `.cjs` o `.mjs`). El widget agrega los dos argumentos `dashboard` y `--json` e invoca la fuente directamente con `execFile`. Los scripts de Node se ejecutan con el binario de Electron en modo Node. Configura la variable antes de arrancar la instancia.
+En Linux y macOS el widget ejecuta `~/.claude-bridge/bin/agent dashboard --json`. Puedes asignar `BRIDGE_WIDGET_CMD` a otro ejecutable o script Node (`.js`, `.cjs` o `.mjs`) cuya ruta esté dentro de `~/.claude-bridge`; se rechazan rutas que salgan de ese directorio. Agrega `dashboard` y `--json` e invoca la fuente con `execFile`. Los scripts Node se ejecutan con el binario de Electron en modo Node. Configura la variable antes de arrancar la instancia.
 
 ```sh
-BRIDGE_WIDGET_CMD="/ruta/al/agent" npm start
+BRIDGE_WIDGET_CMD="$HOME/.claude-bridge/bin/agent" npm start
 ```
 
 En Windows configura la ruta de un ejecutable equivalente o de un script de Node que acepte esos argumentos y emita el mismo JSON por stdout. Ejemplo en PowerShell:
