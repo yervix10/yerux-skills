@@ -147,10 +147,16 @@ async function poll(force = false) {
   if (quitting || !window || window.isDestroyed() || (!force && (!window.isVisible() || window.isMinimized())) || currentPoll) return;
   const started = Date.now();
   currentPoll = new AbortController();
+  const signal = currentPoll.signal;
   try {
-    snapshot = { data: await fetchDashboard(currentPoll.signal), disconnected: false };
-  } catch {
-    snapshot = { ...snapshot, disconnected: true };
+    snapshot = { data: await fetchDashboard(signal), disconnected: false };
+    failures = 0;
+  } catch (error) {
+    // A cancelled poll (window hidden/shown) is not a connection failure.
+    if (signal.aborted) { currentPoll = undefined; return rearm(started); }
+    failures += 1;
+    console.error('poll falló:', error && error.message);
+    if (failures >= 3) snapshot = { ...snapshot, disconnected: true };
   } finally {
     currentPoll = undefined;
   }
@@ -158,6 +164,12 @@ async function poll(force = false) {
   if (!window.isDestroyed() && !window.webContents.isLoadingMainFrame()) {
     window.webContents.send('dashboard:update', snapshot);
   }
+  rearm(started);
+}
+
+let failures = 0;
+function rearm(started) {
+  if (quitting || !window || window.isDestroyed()) return;
   if (window.isVisible() && !window.isMinimized()) pollingTimer = setTimeout(poll, Math.max(0, settings.interval * 1000 - (Date.now() - started)));
 }
 
