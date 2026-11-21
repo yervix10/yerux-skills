@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Agent Bridge</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="metrics.js"></script>
+  <script defer src="renderer.js"></script>
+</head>
+<body>
+  <div class="panel" id="panel">
+    <header id="header">
+      <div class="grip" title="Arrastrar ventana" aria-hidden="true"></div>
+      <div class="heading">
+        <h1>Agent Bridge</h1>
+        <p id="summary">Conectando…</p>
+      </div>
+      <time id="updated" aria-label="Última actualización"></time>
+      <button id="toggle" type="button" aria-controls="content" aria-expanded="true" aria-label="Contraer resumen">
+        <span aria-hidden="true">⌃</span>
+      </button>
+    </header>
+    <main id="content">
+      <p id="connection" role="status" hidden>Sin conexión con el bridge</p>
+      <div id="agents"></div>
+    </main>
+    <p class="sr-only" id="announcement" role="status"></p>
+  </div>
+</body>
+</html>

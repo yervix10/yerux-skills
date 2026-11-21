@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# bridge-widget [start|stop|status] [--quiet]: the desktop widget (Electron) that shows every agent live.
+# `agent widget ...` runs it; `agent up` and `admin` start it automatically (BRIDGE_WIDGET=0 or WIDGET=0 in ~/.claude-bridge/config turns that off).
+B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; W="${BRIDGE_WIDGET_DIR:-$B/widget}"; act="${1:-start}"; quiet=0; for a in "$@"; do [ "$a" = --quiet ] && quiet=1; done
+[ "$act" = --quiet ] && act=start
+say() { [ $quiet = 1 ] || echo "$*" >&2; }
+case "$act" in start|stop|status) ;; *) echo "usage: agent widget [start|stop|status]" >&2; exit 2;; esac
+[ -x "$W/bin/agent-bridge-widget" ] || { say "widget: not installed ($W). Install the skills again or run: npm ci --include=dev in the widget folder."; exit 2; }
+[ -d "$W/node_modules/electron" ] || { say "widget: Electron is missing. Run: cd $W && npm ci --include=dev"; exit 2; }
+command -v node >/dev/null 2>&1 || { say "widget: Node.js (>= 22.12) is required"; exit 2; }
+# the widget reads its data from `agent dashboard --json`
+export BRIDGE_WIDGET_CMD="${BRIDGE_WIDGET_CMD:-$B/bin/agent}"
+if [ "$act" = start ]; then
+  case "$(uname -s)" in Linux) [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { say "widget: no graphical session"; exit 2; };; esac
+fi
+if [ $quiet = 1 ]; then exec "$W/bin/agent-bridge-widget" "$act" >/dev/null 2>&1; else exec "$W/bin/agent-bridge-widget" "$act"; fi

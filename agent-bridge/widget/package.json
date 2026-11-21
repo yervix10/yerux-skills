@@ -1,0 +1,17 @@
+{
+  "name": "agent-bridge-widget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Widget de escritorio para el dashboard de agent-bridge",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "electron": "45.4.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

@@ -28,9 +28,11 @@ Monitoring: `agent status` (idle / WORKING + last tool / LIMITED / NO HEARTBEAT)
 `BRIDGE_STALL` (no-activity seconds, default 600), `BRIDGE_LIMIT_PAUSE` (default 300). Check the install with `./install.sh --check`.
 The admin has `/dashboard` (a single snapshot, `agent dashboard --once`) and `agent model <worker> <model|default> [effort]` / `agent effort <worker> <level|default>` (only the admin; applies from the worker's next order; the dashboard shows the effort in use).
 The installer wraps each Claude account's status line by default so the dashboard has its numbers (`--no-statusline` skips it).
+`agent capacity [--apply]` tells the admin how much work each worker can take from its 5h/weekly/monthly limits (tier skip/light/normal/heavy, suggested load share) and which model/effort to give it; `--apply` sets them.
 `agent refresh [name|all]` makes one tiny request per Claude account so the dashboard has fresh numbers (a few tokens each).
 On setups that keep a per-session status line cache (`~/.cache/lordos/claude/*.json`) the interactive agents are read from it automatically.
-`agent dashboard` shows every agent live, like the status line: `model | project | branch | ctx % | 5h % | sem %` + its state.
+`agent dashboard` shows every agent live, like the status line: `model | project | branch | ctx % | 5h % (↻ time to reset) | sem % (↻) | mes % (↻)` + its state (`mes` only when the provider has a monthly window).
+Runners compact their context before an order once it reaches `COMPACT_AT` % (default 40, `0` disables; set in `~/.claude-bridge/config` or `BRIDGE_COMPACT_AT`).
 Codex data comes from its latest session file; Claude data from the worker's live log, or from the real status line JSON if you install
 with `./install.sh --statusline` (wraps the account's status line, which keeps looking the same; `--uninstall` restores it). Desktop notifications on alerts/limits/errors (`BRIDGE_NOTIFY=0` to mute).
 `BRIDGE_REASSIGN=1` (or `REASSIGN=1` in config): when a worker hits a usage limit its order goes to an idle worker.

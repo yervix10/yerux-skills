@@ -21,7 +21,12 @@ ab_options_menu() {
 do_scripts() {
   mkdir -p "$BR/bin" "$BR/inbox" "$BR/read" && chmod 700 "$BR"
   for s in "$SRC"/scripts/*; do chmod +x "$s"; ln -sfn "$s" "$BR/bin/$(basename "$s")"; done
-  printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; printf 'BYPASS=%s\n' "$OPT_BYPASS" > "$BR/config"; }
+  printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; printf 'BYPASS=%s\n' "$OPT_BYPASS" > "$BR/config"; do_widget; }
+# Desktop widget (Electron): linked at ~/.claude-bridge/widget and installed with npm when Node >= 22.12 exists. BRIDGE_INSTALL_WIDGET=0 skips it.
+do_widget() { [ "${BRIDGE_INSTALL_WIDGET:-1}" = 1 ] && [ -d "$SRC/widget" ] || return 0
+  ln -sfn "$SRC/widget" "$BR/widget"; chmod +x "$SRC/widget/bin/agent-bridge-widget" 2>/dev/null
+  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { say "widget: Node.js/npm not found; install Node >= 22.12 and run 'npm ci --include=dev' in $SRC/widget"; return 0; }
+  [ -d "$SRC/widget/node_modules/electron" ] || ( cd "$SRC/widget" && npm ci --include=dev >/dev/null 2>&1 ) || say "widget: 'npm ci' failed; run it by hand in $SRC/widget"; return 0; }
 do_path() { mkdir -p "$HOME/.local/bin" && ln -sfn "$BR/bin/agent" "$HOME/.local/bin/agent" && ln -sfn "$BR/bin/admin" "$HOME/.local/bin/admin"; }
 
 # Per-account install / uninstall.

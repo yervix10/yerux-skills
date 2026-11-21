@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
-# bridge-usage <name>: prints one tab-separated line "model  project  branch  ctx%  5h%  week%  age_seconds  effort" for an agent
-# ("-" = unknown). Codex: read from its latest session file (the same data its UI shows). Claude: from its worker's live log.
+# bridge-usage <name>: prints one tab-separated line "model  project  branch  ctx%  5h%  week%  age_seconds  effort  5h_reset  week_reset  month%  month_reset" for an agent
+# ("-" = unknown; *_reset are epoch seconds; month = a provider window longer than a week, e.g. Codex free/go plans). Codex: read from its latest session file (the same data its UI shows). Claude: from its worker's live log.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
-now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""
+now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""
 case "$(basename "$dir")" in
   .codex*)
     f="$(find "$dir/sessions" -name '*.jsonl' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
     if [ -n "$f" ]; then
       at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
       tail -n 400 "$f" > "${TMPDIR:-/tmp}/bu.$$"
-      model="$(jq -r 'select(.type=="turn_context")|.payload.model' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
-      cwd="$(jq -r 'select(.type=="turn_context")|.payload.cwd' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
-      eff="$(jq -r 'select(.type=="turn_context")|.payload.effort // empty' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
+      # model / effort / cwd come from the LAST turn_context of the whole file (a long session has them far above its last 400 lines)
+      tc="$(grep '"type":"turn_context"' "$f" 2>/dev/null | tail -1)"
+      model="$(printf '%s' "$tc" | jq -r '.payload.model // empty' 2>/dev/null)"
+      cwd="$(printf '%s' "$tc" | jq -r '.payload.cwd // empty' 2>/dev/null)"
+      eff="$(printf '%s' "$tc" | jq -r '.payload.effort // empty' 2>/dev/null)"
       [ -n "$cwd" ] || cwd="$(head -1 "$f" | jq -r '.payload.cwd // empty' 2>/dev/null)"
+      # windows are told apart by length: <=10h = "5h", <=14 days = week, longer = month (Codex free/go plans have only a 30-day window)
       row="$(jq -r --argjson now "$now" 'select(.type=="event_msg" and .payload.type=="token_count" and .payload.rate_limits!=null)|
-        [ (if .payload.info.model_context_window then ((.payload.info.last_token_usage.total_tokens*100/.payload.info.model_context_window)|floor) else "" end),
-          ([.payload.rate_limits.primary,.payload.rate_limits.secondary][]|select(.!=null)|select(.window_minutes<=600)|(if .resets_at<$now then 0 else (.used_percent|floor) end))//"",
-          ([.payload.rate_limits.primary,.payload.rate_limits.secondary][]|select(.!=null)|select(.window_minutes>600)|(if .resets_at<$now then 0 else (.used_percent|floor) end))//"" ]|@tsv' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
-      rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; wk="$(printf '%s' "$row" | cut -f3)"
+        ([.payload.rate_limits.primary,.payload.rate_limits.secondary]|map(select(.!=null))) as $w | select(($w|length)>0) |
+        def p(f): ($w|map(select(.window_minutes|f))|first) as $x | if $x==null then ["",""] else [(if $x.resets_at<$now then 0 else ($x.used_percent|floor) end), $x.resets_at] end;
+        [ (if .payload.info.model_context_window then ((.payload.info.last_token_usage.total_tokens*100/.payload.info.model_context_window)|floor) else "" end) ]
+        + p(.<=600) + p(.>600 and .<=20160) + p(.>20160) | @tsv' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
+      rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; h5r="$(printf '%s' "$row" | cut -f3)"
+      wk="$(printf '%s' "$row" | cut -f4)"; wkr="$(printf '%s' "$row" | cut -f5)"; mo="$(printf '%s' "$row" | cut -f6)"; mor="$(printf '%s' "$row" | cut -f7)"
     fi;;
   .claude*)
     # candidates, newest wins: (a) JSON saved by bridge-statusline, (b) the status line cache some setups keep per session
@@ -34,12 +39,13 @@ case "$(basename "$dir")" in
       model="$(jq -r '.model.display_name // empty' "$u" 2>/dev/null)"; eff="$(jq -r '.effort.level // empty' "$u" 2>/dev/null)"; cwd="$(jq -r '.workspace.current_dir // .cwd // empty' "$u" 2>/dev/null)"
       ctx="$(jq -r '.context_window.used_percentage // empty|floor' "$u" 2>/dev/null)"
       h5="$(jq -r '.rate_limits.five_hour.used_percentage // empty|floor' "$u" 2>/dev/null)"; wk="$(jq -r '.rate_limits.seven_day.used_percentage // empty|floor' "$u" 2>/dev/null)"
+      h5r="$(jq -r '.rate_limits.five_hour.resets_at // empty' "$u" 2>/dev/null)"; wkr="$(jq -r '.rate_limits.seven_day.resets_at // empty' "$u" 2>/dev/null)"
     elif [ -s "$f" ]; then
       at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
       model="$(jq -r 'select(.type=="system" and .subtype=="init")|.model' "$f" 2>/dev/null | tail -1)"
       cwd="$(jq -r 'select(.type=="system" and .subtype=="init")|.cwd' "$f" 2>/dev/null | tail -1)"
-      row="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|[((.unifiedWindows.five_hour.utilization // empty)*100|floor), ((.unifiedWindows.seven_day.utilization // empty)*100|floor)]|@tsv' "$f" 2>/dev/null | tail -1)"
-      h5="$(printf '%s' "$row" | cut -f1)"; wk="$(printf '%s' "$row" | cut -f2)"
+      row="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|[((.unifiedWindows.five_hour.utilization // empty)*100|floor), ((.unifiedWindows.seven_day.utilization // empty)*100|floor), (.unifiedWindows.five_hour.resetsAt // ""), (.unifiedWindows.seven_day.resetsAt // "")]|@tsv' "$f" 2>/dev/null | tail -1)"
+      h5="$(printf '%s' "$row" | cut -f1)"; wk="$(printf '%s' "$row" | cut -f2)"; h5r="$(printf '%s' "$row" | cut -f3)"; wkr="$(printf '%s' "$row" | cut -f4)"
       # context: tokens of the last assistant message over the model's window (reported in the result event)
       used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0)+(.cache_creation_input_tokens // 0))' "$f" 2>/dev/null | tail -1)"
       win="$(jq -r 'select(.type=="result")|.modelUsage|to_entries[0].value.contextWindow // empty' "$f" 2>/dev/null | tail -1)"
@@ -48,5 +54,8 @@ case "$(basename "$dir")" in
 esac
 proj=""; br=""; if [ "$cwd" = "$HOME" ]; then proj="~"; elif [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
 age=""; [ -n "$at" ] && age=$((now - at))
+# a window whose reset moment already passed has been renewed: 0% used, reset time unknown until fresh data arrives
+for w in h5 wk mo; do r="${w}r"; [ "$w" = mo ] && r=mor; rv="${!r}"
+  if [ -n "$rv" ] && [ "$rv" -le "$now" ] 2>/dev/null; then printf -v "$w" 0; printf -v "$r" ''; fi; done
 # "-" stands for unknown so tab-splitting (which collapses empty fields) keeps the columns aligned
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}" "${h5r:--}" "${wkr:--}" "${mo:--}" "${mor:--}"
