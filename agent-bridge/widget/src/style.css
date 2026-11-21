@@ -242,6 +242,8 @@ main::-webkit-scrollbar-track { background: transparent; }
   font-variant-numeric: tabular-nums;
 }
 .metric-label, .countdown { color: var(--muted); }
+.metric-extra { grid-column: 1 / -1; margin-left: 52px; color: var(--muted); font-size: 8px; }
+.metric-extra { grid-column: 1 / -1; margin-left: 52px; color: var(--muted); font-size: 8px; }
 .percent, .countdown { text-align: end; white-space: nowrap; }
 .percent { font-weight: 650; transition: color .24s ease; }
 .countdown { color: var(--faint); font-size: 8px; }
@@ -280,6 +282,8 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .compact .state { margin-inline-start: auto; }
 .compact-percent { font-weight: 720; font-variant-numeric: tabular-nums; }
 .compact-tier { min-width: 38px; text-align: center; color: var(--muted); font-size: 9px; }
+.compact-age { grid-column: 1 / -1; color: var(--amber); font-size: 8px; }
+.compact-monthly { grid-column: 1 / -1; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .collapsed header { min-height: 54px; }
 .collapsed .brand-icon { width: 26px; height: 26px; }
 #detail-view { display: flex; flex-direction: column; min-height: 0; gap: 5px; padding: 5px 2px 2px; }

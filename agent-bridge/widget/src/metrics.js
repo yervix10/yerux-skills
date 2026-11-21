@@ -60,7 +60,9 @@
     for (const [key, label] of [['five_hour', '5 h'], ['weekly', 'Semana'], ['monthly', 'Mes']]) {
       const usage = agent[key];
       if (usage.used !== null || usage.resets_at !== null) {
-        rows.push({ key, label, used: usage.used, resetsAt: usage.resets_at, context: false });
+        const details = key === 'monthly' && Number.isFinite(usage.credits_used) && Number.isFinite(usage.credits_total)
+          ? `${usage.credits_used.toFixed(2)} / ${usage.credits_total.toFixed(0)} créditos${usage.plan ? ` · ${usage.plan}` : ''}` : '';
+        rows.push({ key, label, used: usage.used, resetsAt: usage.resets_at, context: false, detail: details });
       }
     }
     return rows;

@@ -6,11 +6,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; OLDPATH="$PATH"
 T="$(mktemp -d)"; trap 'kill $RP 2>/dev/null; rm -rf "$T"' EXIT; RP=""
 S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/proj"
 cp -a "$ROOT/agent-bridge/scripts/." "$S/"
-export BRIDGE_DIR="$T/b" FAKEMODE="$T/mode" KIRO_TEST_HOME="$T/home/.kiro-fake" PATH="$T/bin:$PATH" BRIDGE_ALERT=0 BRIDGE_STALL=0 BRIDGE_WORKTREE=0 BRIDGE_LIMIT_PAUSE=3 BRIDGE_NOTIFY=0
+export BRIDGE_DIR="$T/b" FAKEMODE="$T/mode" KIRO_TEST_HOME="$T/home/.kiro-fake" CLAUDE_TEST_ARGS="$T/claude-test-args" PATH="$T/bin:$PATH" BRIDGE_ALERT=0 BRIDGE_STALL=0 BRIDGE_WORKTREE=0 BRIDGE_LIMIT_PAUSE=3 BRIDGE_COMPACT_AT=40 BRIDGE_NOTIFY=0
 printf "%s\n%s\n%s\n" "$T/home/.claude-fake=w1" "$T/home/.codex-fake=w2" "$T/home/.kiro-fake=kiro-1" > "$T/b/names.conf"; echo adm > "$T/b/admin"
 cat > "$T/bin/claude" <<'EOF'
 #!/bin/bash
 echo "$PWD" > "$FAKEMODE.cwd"
+printf '%s\npct=%s\n' "$*" "${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-unset}" > "$CLAUDE_TEST_ARGS"
 ev() { printf '%s\n' "$1"; }
 case "$(cat "$FAKEMODE")" in
   ok)    ev '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}'; ev '{"type":"result","subtype":"success","is_error":false,"result":"all done"}';;
@@ -21,6 +22,8 @@ esac
 EOF
 cat > "$T/bin/codex" <<'EOF'
 #!/bin/bash
+if [[ "$*" == 'debug models --bundled' ]]; then echo '{"models":[{"slug":"gpt-test","visibility":"list","priority":1,"context_window":50000}]}' ; exit 0; fi
+echo "$*" > "$FAKEMODE.args"
 out=""; while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done
 echo "$PWD" > "$FAKEMODE.cwd"; ev() { printf '%s\n' "$1"; }
 ev '{"type":"thread.started","thread_id":"t-123"}'
@@ -34,6 +37,7 @@ cat > "$T/bin/kiro-cli" <<'EOF'
 if [[ "$*" != *"--list-models"* && "$*" != *"--list-sessions"* ]]; then echo "$*" > "$FAKEMODE.args"; fi
 if [[ "$*" == *"--list-models"* ]]; then echo '{"models":[{"model_id":"auto"},{"model_id":"claude-sonnet-4.5"}]}'; exit 0; fi
 if [[ "$*" == *"--list-sessions"* ]]; then printf '[{"cwd":"%s","sessions":[{"sessionId":"sess-kiro-test","updatedAt":"2026-11-21T20:00:00Z"}]}]\n' "$PWD"; exit 0; fi
+if [[ "$*" == settings\ * ]]; then echo "$*" >> "$KIRO_TEST_HOME/settings.log"; mkdir -p "$PWD/.kiro/settings"; echo '{}' > "$PWD/.kiro/settings/cli.json"; exit 0; fi
 [[ "$*" == *"--resume-id sess-kiro-test"* ]] && echo resumed >> "$KIRO_TEST_HOME/resumed.log"
 echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Primera parte.\n"}}}}'
 echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"tool_call","toolCall":{"name":"fs_read","title":"Read file"}}}}'
@@ -55,6 +59,8 @@ status() { "$S/agent" status 2>/dev/null; }
 
 echo "ok reply"; echo ok > "$T/mode"; start; send "do it"; wait_reply 1
 check "reply is the result event" "$(last_msg)" "all done"; check "status idle/ok" "$(status)" "~last order: ok"
+check "Claude enables native auto-compact with settings" "$(grep -Fc -- '--settings {"autoCompactEnabled":true}' "$CLAUDE_TEST_ARGS")" "1"
+check "Claude receives COMPACT_AT as a percent" "$(grep -c '^pct=40$' "$CLAUDE_TEST_ARGS")" "1"
 
 echo "limit pauses the worker"; echo limit > "$T/mode"; send "again"; wait_reply 2
 check "reply starts with LIMIT" "$(last_msg | cut -c1-6)" "LIMIT:"; sleep 1
@@ -81,7 +87,9 @@ check ".worktrees is ignored" "$(git -C "$T/proj" status --short | wc -l | tr -d
 echo "codex worker"; rm -f "$T/b/inbox/adm"/*; echo ok > "$T/mode"; export CODEXSLEEP=9; start w2
 printf 'From: adm\nTo: w2\nDate: x\nCwd: /tmp\n\nbuild it\n' > "$T/b/inbox/w2/$(date +%s%N)-de-adm.msg"; sleep 7
 check "codex activity shown" "$("$S/agent" status 2>/dev/null | grep w2)" "~now: command_execution ls -la"; wait_reply 1
-check "codex reply from -o file" "$(last_msg)" "codex done"; echo limit > "$T/mode"; printf 'From: adm\nTo: w2\nDate: x\nCwd: /tmp\n\nagain\n' > "$T/b/inbox/w2/$(date +%s%N)-de-adm.msg"; wait_reply 2
+check "codex reply from -o file" "$(last_msg)" "codex done"
+check "Codex native threshold is 40% of the model window" "$(grep -c 'model_auto_compact_token_limit=20000' "$FAKEMODE.args")" "1"
+echo limit > "$T/mode"; printf 'From: adm\nTo: w2\nDate: x\nCwd: /tmp\n\nagain\n' > "$T/b/inbox/w2/$(date +%s%N)-de-adm.msg"; wait_reply 2
 check "codex limit classified" "$(last_msg | cut -c1-6)" "LIMIT:"; stop; unset CODEXSLEEP
 
 echo "reassign on limit"; rm -f "$T/b/inbox/adm"/* "$T/b/runs"/*; echo ok > "$T/mode"; export BRIDGE_REASSIGN=1
@@ -142,6 +150,17 @@ check "claude usage from a status line cache" "$(BRIDGE_STATUS_CACHE="$T/sc" BRI
 ( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --uninstall --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
 check "uninstall restores the original status line" "$(jq -r '.statusLine.command' "$H2/.claude-a/settings.json")" "echo ORIG-BAR"
 
+echo "Claude context cache survives empty live logs"
+cat > "$T/b/logs/w1.live" <<'EOF'
+{"type":"assistant","message":{"usage":{"input_tokens":80000,"cache_read_input_tokens":20000}}}
+{"type":"result","modelUsage":{"sonnet":{"contextWindow":200000}}}
+EOF
+check "Claude context is cached when known" "$("$S/bridge-usage" w1 | cut -f4)" "50"
+: > "$T/b/logs/w1.live"
+check "Claude context is retained when the live log empties" "$("$S/bridge-usage" w1 | cut -f4)" "50"
+old_ctx_at=$(( $(date +%s) - 1200 )); jq --argjson at "$old_ctx_at" '.updated_at=$at' "$T/b/usage/w1.last" > "$T/ctx-cache-old.tmp" && mv "$T/ctx-cache-old.tmp" "$T/b/usage/w1.last"
+check "Claude cache exposes its original sample age" "$([ "$("$S/bridge-usage" w1 | cut -f7)" -ge 1199 ] && echo yes)" "yes"
+
 echo "model switch and dashboard command"
 export PATH="$T/bin:$OLDPATH"; echo adm > "$T/b/admin"
 check "non-admin cannot change a model" "$(BRIDGE_NAME=w1 "$S/agent" model w2 gpt-x 2>&1 | head -1 | cut -c1-30)" "only the admin can change a wo"
@@ -178,14 +197,51 @@ check "provider resolver detects Kiro config prefix" "$("$S/bridge-provider" kir
 check "Kiro tier defaults to normal without account quota data" "$("$S/bridge-capacity" --tier kiro-1)" "normal"
 check "Kiro model is checked against CLI model list" "$(BRIDGE_NAME=adm "$S/agent" model kiro-1 claude-sonnet-4.5)" "kiro-1: model set to claude-sonnet-4.5 (applies from its next order)"
 BRIDGE_NAME=adm "$S/agent" effort kiro-1 high >/dev/null
+mkdir -p "$T/kiro-proj"
 base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start kiro-1
-printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: /tmp\n\nresponde solo: ok\n' > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1));
+printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/kiro-proj" > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1));
 check "Kiro runner returns every multipart text fragment" "$(last_msg)" "Primera parte.
 Segunda parte."
 check "Kiro prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.args")" "1"
 check "Kiro saves list-sessions id for next order" "$(cat "$T/b/sessions/kiro-1/$(find "$T/b/sessions/kiro-1" -maxdepth 1 -type f ! -name '*.cwd' -printf '%f\n' | head -1)" 2>/dev/null)" "sess-kiro-test"
-printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: /tmp\n\nsecond order\n' > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2)); stop
+printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: %s\n\nsecond order\n' "$T/kiro-proj" > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2)); stop
 check "Kiro resumes by its saved session id" "$(cat "$T/home/.kiro-fake/resumed.log" 2>/dev/null | wc -l | tr -d ' ')" "1"
 check "Kiro receives configured model and effort" "$(grep -c -- '--model claude-sonnet-4.5 --effort high' "$FAKEMODE.args" 2>/dev/null || true)" "1"
+check "Kiro gets COMPACT_AT as a temporary workspace setting" "$(grep -c 'compaction.autoCompactionThreshold 40 --workspace' "$KIRO_TEST_HOME/settings.log")" "2"
+check "Kiro workspace override is removed after each order" "$([ -e "$T/kiro-proj/.kiro/settings/cli.json" ] && echo present || echo absent)" "absent"
+
+echo "Kiro usage cache parses monthly plan and deletes usage-only sessions"
+UCLI="$T/bin/kiro-usage-cli"; UB="$T/kiro-usage-bridge"; mkdir -p "$UB"
+cat > "$UCLI" <<'EOF'
+#!/bin/bash
+if [[ "$*" == *"--list-sessions"* ]]; then
+  n=$(cat "$KIRO_USAGE_TEST.list-count" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$KIRO_USAGE_TEST.list-count"
+  if [ "$n" -eq 1 ]; then echo '[]'; else echo '[{"sessions":[{"sessionId":"usage-only-session"}]}]'; fi
+elif [[ "$*" == *"--delete-session"* ]]; then echo "${@: -1}" > "$KIRO_USAGE_TEST.deleted"
+elif [[ "$*" == *"/usage"* ]]; then
+  echo 'Estimated Usage | resets on 2026-12-01 | KIRO FREE'
+  echo 'Credits (7.25 of 50 covered in plan), 14.5%'
+  echo usage >> "$KIRO_USAGE_TEST.usage-count"
+fi
+EOF
+chmod +x "$UCLI"; export KIRO_USAGE_TEST="$T/kiro-usage-test"
+BRIDGE_KIRO_CLI="$UCLI" "$S/bridge-kiro-usage" sample "$UB" >/dev/null
+for i in $(seq 1 40); do [ -s "$UB/sample.kiro.json" ] && break; sleep 0.1; done
+check "Kiro monthly percent is parsed" "$(jq -r .percent "$UB/sample.kiro.json" 2>/dev/null)" "14.5"
+check "Kiro credit totals and plan are cached" "$(jq -r '[.credits_used,.credits_total,.plan]|@tsv' "$UB/sample.kiro.json" 2>/dev/null)" "7.25	50	KIRO FREE"
+check "Kiro usage-only session was deleted" "$(cat "$KIRO_USAGE_TEST.deleted" 2>/dev/null)" "usage-only-session"
+BRIDGE_KIRO_CLI="$UCLI" "$S/bridge-kiro-usage" sample "$UB" >/dev/null
+check "Kiro /usage runs once within its five-minute cache" "$(wc -l < "$KIRO_USAGE_TEST.usage-count" | tr -d ' ')" "1"
+mkdir -p "$T/home/.kiro-fake/sessions/hash/sess-kiro-test"
+printf '{"modelId":"auto","contextSnapshotModelDisplay":{"display":"Auto (model selected dynamically on the server)"},"workspacePaths":["%s"]}\n' "$T/proj" > "$T/home/.kiro-fake/sessions/hash/sess-kiro-test/session.json"
+printf '%s\n' '{"payload":{"type":"session_metadata","key":"contextUsage","value":{"usagePercentage":33}}}' > "$T/home/.kiro-fake/sessions/hash/sess-kiro-test/messages.jsonl"
+cp "$UB/sample.kiro.json" "$T/b/usage/kiro-1.kiro.json"
+BRIDGE_NAME=adm "$S/agent" model kiro-1 default >/dev/null
+KUSAGE="$("$S/bridge-usage" kiro-1)"
+check "Kiro quota is exposed as monthly dashboard fields" "$(printf '%s' "$KUSAGE" | cut -f11,15,16,17)" "14.5	7.25	50	KIRO FREE"
+check "Kiro capacity tiers use its monthly quota" "$("$S/bridge-capacity" --tier kiro-1)" "heavy"
+KJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "Kiro auto model explains task routing" "$(printf '%s' "$KJSON" | jq -r '.agents[]|select(.name=="kiro-1")|.model_note')" "Kiro elige el modelo según la tarea (Models chosen by task)."
+check "Kiro widget data carries plan, credits and monthly percent" "$(printf '%s' "$KJSON" | jq -r '.agents[]|select(.name=="kiro-1")|[.monthly.used,.monthly.credits_used,.monthly.credits_total,.monthly.plan]|@tsv')" "14.5	7.25	50	KIRO FREE"
 
 echo; echo "passed: $pass  failed: $fail"; [ $fail = 0 ]

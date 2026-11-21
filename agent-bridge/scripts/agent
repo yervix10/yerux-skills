@@ -4,7 +4,7 @@ D="$(dirname "$0")"; R="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-w
 dashboard_tier() {
   local now="$1" h5="$2" wk="$3" mo="$4" h5r="$5" wkr="$6" mor="$7" best=101 penal=0 any=0 p r wn len rem tier
   for item in "h5:18000:$h5:$h5r" "wk:604800:$wk:$wkr" "mo:2592000:$mo:$mor"; do
-    IFS=: read -r wn len p r <<< "$item"; [ -n "$p" ] || continue; any=1
+    IFS=: read -r wn len p r <<< "$item"; [ -n "$p" ] || continue; p="${p%.*}"; any=1
     rem=$((100 - p)); [ "$rem" -lt 0 ] && rem=0; [ "$rem" -lt "$best" ] && best="$rem"
     if [ "$wn" != h5 ] && [ -n "$r" ] && [ "$r" -gt "$now" ] 2>/dev/null; then
       el=$(( (len - (r - now)) * 100 / len )); [ $((p - el)) -gt 15 ] && penal=1
@@ -70,21 +70,22 @@ case "$1" in
       if [ "$2" = --json ]; then # machine-readable snapshot (what the desktop widget reads): {"time":epoch,"agents":[...]}
         st="$("$0" status)"; adm="$(cat "$R/admin" 2>/dev/null)"; now=$(date +%s); items=()
         for n in $(awk -F= '{print $2}' "$R/names.conf"); do
-          IFS=$'\t' read -r model proj br ctx h5 wk age eff h5r wkr mo mor credits < <("$D/bridge-usage" "$n" 2>/dev/null)
-          for v in model proj br ctx h5 wk age eff h5r wkr mo mor credits; do [ "${!v}" = - ] && printf -v "$v" ''; done
+          IFS=$'\t' read -r model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan < <("$D/bridge-usage" "$n" 2>/dev/null)
+          for v in model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan; do [ "${!v}" = - ] && printf -v "$v" ''; done
           line="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"; role=worker; [ "$n" = "$adm" ] && role=admin
           case "$line" in "") state=${role/worker/off}; [ "$role" = admin ] && state=admin;; "-"*) state=off;; *LIMITED*) state=limited;; *"NO HEARTBEAT"*) state=stuck;; *WORKING*) state=working;; *idle*) state=idle;; *) state=unknown;; esac
           [ "$role" = admin ] && state=admin
           want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
           tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"
           kind="$("$D/bridge-provider" "$n" 2>/dev/null || echo other)"
-          items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" \
+          model_note=""; [ "$kind" != kiro ] || [ "$model" != auto ] || model_note="Kiro elige el modelo según la tarea (Models chosen by task)."
+          items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg model_note "$model_note" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" --arg plan_used "$plan_used" --arg plan_total "$plan_total" --arg plan "$plan" \
             --arg ctx "$ctx" --arg h5 "$h5" --arg h5r "$h5r" --arg wk "$wk" --arg wkr "$wkr" --arg mo "$mo" --arg mor "$mor" --arg age "$age" \
-            '{name:$name,role:$role,kind:$kind,state:$state,detail:$line,model:$model,effort:$eff,set_model:$want,set_effort:$weff,project:$proj,branch:$br,tier:$tier,credit_used:($credits|tonumber? // null),
+            '{name:$name,role:$role,kind:$kind,state:$state,detail:$line,model:$model,model_note:$model_note,effort:$eff,set_model:$want,set_effort:$weff,project:$proj,branch:$br,tier:$tier,credit_used:($credits|tonumber? // null),
               context:($ctx|tonumber? // null),data_age_s:($age|tonumber? // null),
               five_hour:{used:($h5|tonumber? // null),resets_at:($h5r|tonumber? // null)},
               weekly:{used:($wk|tonumber? // null),resets_at:($wkr|tonumber? // null)},
-              monthly:{used:($mo|tonumber? // null),resets_at:($mor|tonumber? // null)}}')"); done
+              monthly:{used:($mo|tonumber? // null),resets_at:($mor|tonumber? // null),credits_used:($plan_used|tonumber? // null),credits_total:($plan_total|tonumber? // null),plan:(if $plan=="" or $plan=="-" then null else $plan end)}}')"); done
         printf '%s\n' "${items[@]}" | jq -s --argjson t "$now" '{time:$t,agents:.}'; exit 0; fi
       once=0; [ "$2" = --once ] && once=1
       if [ $once = 0 ]; then trap 'printf "\033[?25h"; exit 0' INT TERM; printf '\033[?25l'; fi
@@ -97,8 +98,8 @@ case "$1" in
         if [ $once = 0 ]; then printf '\033[H\033[2J'; printf '\033[1magent-bridge\033[0m  %s   \033[2m(Ctrl+C to exit)\033[0m\n\n' "$(date +%T)"; else echo "agent-bridge  $(date +%T)"; echo; fi
         st="$("$0" status)"
         for n in $(awk -F= '{print $2}' "$R/names.conf"); do
-          IFS=$'\t' read -r model proj br ctx h5 wk age eff h5r wkr mo mor credits < <("$D/bridge-usage" "$n" 2>/dev/null)
-          for v in model proj br ctx h5 wk age eff h5r wkr mo mor credits; do [ "${!v}" = - ] && printf -v "$v" ''; done
+          IFS=$'\t' read -r model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan < <("$D/bridge-usage" "$n" 2>/dev/null)
+          for v in model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan; do [ "${!v}" = - ] && printf -v "$v" ''; done
           want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
           state="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"
           col 1; printf '%-9s' "$n"; col 0; printf ' %s' "${model:-–}"; [ -n "$eff" ] && printf ' · %s' "$eff"; { [ -n "$want" ] || [ -n "$weff" ]; } && printf ' (set: %s)' "$(printf '%s %s' "${want:-}" "${weff:+effort $weff}" | sed 's/^ //; s/ $//')"

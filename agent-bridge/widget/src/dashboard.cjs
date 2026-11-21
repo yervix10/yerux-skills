@@ -50,14 +50,35 @@ function parseDashboard(source) {
       if (!(agent.credit_used === null || (Number.isFinite(agent.credit_used) && agent.credit_used >= 0))) throw new TypeError(`Créditos inválidos en la posición ${index}`);
       normalized.credit_used = agent.credit_used;
     }
+    if (agent.model_note !== undefined) {
+      if (typeof agent.model_note !== 'string') throw new TypeError(`Nota de modelo inválida en la posición ${index}`);
+      normalized.model_note = agent.model_note;
+    }
     for (const key of periods) {
       const { used, resets_at } = agent[key];
       normalized[key] = { used: used === null ? null : Math.min(used, 100), resets_at };
+      if (key === 'monthly') {
+        for (const field of ['credits_used', 'credits_total']) {
+          if (usageFieldPresent(agent[key], field)) {
+            const value = agent[key][field];
+            if (!(value === null || (Number.isFinite(value) && value >= 0))) throw new TypeError(`Créditos mensuales inválidos en la posición ${index}`);
+            normalized[key][field] = value;
+          }
+        }
+        if (usageFieldPresent(agent[key], 'plan')) {
+          if (!(agent[key].plan === null || typeof agent[key].plan === 'string')) throw new TypeError(`Plan mensual inválido en la posición ${index}`);
+          normalized[key].plan = agent[key].plan;
+        }
+      }
     }
     if (normalized.context !== null) normalized.context = Math.min(normalized.context, 100);
     return normalized;
   });
   return { time: data.time, agents };
+}
+
+function usageFieldPresent(usage, key) {
+  return Object.hasOwn(usage, key);
 }
 
 module.exports = { parseDashboard };

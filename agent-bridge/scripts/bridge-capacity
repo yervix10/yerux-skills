@@ -17,15 +17,16 @@ names=(); total=0
 for n in $(awk -F= '{print $2}' "$B/names.conf"); do
   [ "$n" = "$admin" ] && continue; [ -n "$only" ] && [ "$n" != "$only" ] && continue
   dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$B/names.conf")"; k="$("$D/bridge-provider" "$dir" 2>/dev/null || echo codex)"
-  IFS=$'\t' read -r _ _ _ ctx h5 wk _ _ h5r wkr mo mor < <("$D/bridge-usage" "$n" 2>/dev/null)
+  IFS=$'\t' read -r _ _ _ ctx h5 wk _ _ h5r wkr mo mor _ _ _ _ _ < <("$D/bridge-usage" "$n" 2>/dev/null)
   for v in ctx h5 wk h5r wkr mo mor; do [ "${!v}" = - ] && printf -v "$v" ''; done
+  for v in h5 wk mo; do raw="${!v}"; [[ "$raw" == *.* ]] && printf -v "$v" '%s' "${raw%%.*}"; done
   best=101; bw=""; bwr=""; penal=0; ontrack=1; any=0
   for w in h5:18000:$h5:$h5r wk:604800:$wk:$wkr mo:2592000:$mo:$mor; do IFS=: read -r wn len p r <<< "$w"; [ -n "$p" ] || continue; any=1
     rem=$((100 - p)); [ $rem -lt 0 ] && rem=0
     if [ -n "$r" ] && [ "$r" -gt "$now" ] 2>/dev/null && [ "$wn" != h5 ]; then el=$(( (len - (r - now)) * 100 / len )); [ $((p - el)) -gt 15 ] && penal=1; [ $((p - el)) -gt 0 ] && ontrack=0; fi
     [ "$wn" != h5 ] && [ -z "$r" ] && ontrack=0
     [ $rem -lt $best ] && { best=$rem; bw=$wn; bwr=$r; }; done
-  if [ $any = 0 ]; then t=normal; best=50; note="sin datos de límite"; [ "$k" = kiro ] && note="Kiro sin medición de cuota; tier normal"; else
+  if [ $any = 0 ]; then t=normal; best=50; note="sin datos de límite"; else
     if [ $best -le 5 ]; then t=skip; elif [ $best -le 20 ]; then t=light; elif [ $best -le 50 ]; then t=normal; else t=heavy; fi
     if [ $penal = 1 ]; then case $t in heavy) t=normal;; normal) t=light;; esac; note="ritmo alto en $(lbl "$bw")"; else note=""; fi
     [ -n "$bwr" ] && note="${note:+$note; }límite $(lbl "$bw") ↻$(fmt "$bwr")"; fi

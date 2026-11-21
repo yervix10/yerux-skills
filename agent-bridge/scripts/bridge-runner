@@ -27,6 +27,10 @@ log "bypass=$BYPASS"
 ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"
 S_STATUS=idle; S_SINCE=$(date +%s); S_ORDER=""; S_END=""; S_RC=""; S_KIND=""; LASTBEAT=0; CHILD=""
 COMPACT_AT="${BRIDGE_COMPACT_AT:-$(sed -n 's/^COMPACT_AT=//p' "$B/config" 2>/dev/null | head -1)}"; COMPACT_AT="${COMPACT_AT:-40}"   # % of context that triggers a compaction before the next order (0 = off)
+[[ "$COMPACT_AT" =~ ^[0-9]+$ ]] && [ "$COMPACT_AT" -le 100 ] || COMPACT_AT=40
+CLAUDE_COMPACT_ENABLED=true; [ "$COMPACT_AT" -gt 0 ] || CLAUDE_COMPACT_ENABLED=false
+CLAUDE_COMPACT_ARGS=(--settings "{\"autoCompactEnabled\":$CLAUDE_COMPACT_ENABLED}")
+[ "$COMPACT_AT" -gt 0 ] && CLAUDE_COMPACT_ARGS+=(--autocompact auto)
 LIVE="$B/logs/$name.live"; S_ACT=""; S_ACT_AT=""; PAUSE_UNTIL=0; STALL="${BRIDGE_STALL:-600}"; STALLED_AT=""; LIMIT_PAUSE="${BRIDGE_LIMIT_PAUSE:-300}"
 sw() { printf 'status=%s\nsince=%s\nbeat=%s\norder=%s\nlast_end=%s\nlast_rc=%s\nlast_kind=%s\nactivity=%s\nactivity_at=%s\npause_until=%s\n' "$S_STATUS" "$S_SINCE" "$(date +%s)" "$S_ORDER" "$S_END" "$S_RC" "$S_KIND" "$S_ACT" "$S_ACT_AT" "$PAUSE_UNTIL" > "$ST.tmp" 2>/dev/null && mv "$ST.tmp" "$ST"; }
 # act: last thing a Claude worker did (tool call) and when, read from its live stream-json log
@@ -68,6 +72,27 @@ ctx_now() { local used win
     local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
     f="$(find "$dir/sessions" -name "*$sess*.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
     tail -n 400 "$f" | jq -r 'select(.type=="event_msg" and .payload.type=="token_count" and .payload.info!=null and .payload.info.model_context_window!=null)|((.payload.info.last_token_usage.total_tokens*100/.payload.info.model_context_window)|floor)' 2>/dev/null | tail -1 | grep -E '^[0-9]+$'; fi; return 0; }
+# Resolve the selected Codex model's window and set its native compaction threshold for this order.
+codex_compact_token_limit() {
+  local sess f win model catalog
+  [ "$COMPACT_AT" -gt 0 ] 2>/dev/null || return 0
+  sess="$(cat "$sf" 2>/dev/null)"; f=""
+  [ -n "$sess" ] && f="$(find "$dir/sessions" -name "*$sess*.jsonl" -type f 2>/dev/null | head -1)"
+  if [ -n "$f" ]; then
+    win="$(jq -r 'select(.type=="event_msg" and .payload.type=="token_count")|.payload.info.model_context_window // empty' "$f" 2>/dev/null | tail -1)"
+    model="$(grep '"type":"turn_context"' "$f" 2>/dev/null | tail -1 | jq -r '.payload.model // empty' 2>/dev/null)"
+    [[ "$win" =~ ^[0-9]+$ ]] && { echo $((win * COMPACT_AT / 100)); return; }
+  fi
+  model="$(cat "$B/models/$name" 2>/dev/null)"
+  [ -n "$model" ] || model="$(awk -F= '/^[[:space:]]*model[[:space:]]*=/{gsub(/[\"[:space:]]/,\"\",$2); print $2; exit}' "$dir/config.toml" 2>/dev/null)"
+  catalog="$(CODEX_HOME="$dir" codex debug models --bundled 2>/dev/null)"
+  if [ -n "$model" ]; then win="$(printf '%s' "$catalog" | jq -r --arg m "$model" '.models[]|select(.slug==$m)|.context_window // empty' 2>/dev/null | head -1)"
+  else win="$(printf '%s' "$catalog" | jq -r '(.models|map(select(.visibility=="list"))|sort_by(.priority)|.[0].context_window) // empty' 2>/dev/null)"; fi
+  [[ "$win" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((win * COMPACT_AT / 100))
+}
+add_codex_compact_arg() { local limit; [ "$kind" = codex ] || return 0
+  limit="$(codex_compact_token_limit)"; [[ "$limit" =~ ^[0-9]+$ ]] && [ "$limit" -gt 0 ] && MODEL_ARGS+=(-c "model_auto_compact_token_limit=$limit")
+  [ -z "$limit" ] || log "native Codex auto-compact threshold=${limit} tokens (${COMPACT_AT}% context)"; }
 # maybe_compact: before an order, if the context is >= $COMPACT_AT %, shrink it. Claude: `/compact` on the resumed session.
 # Codex has no compact in `exec`, so it writes a handoff summary, the session is dropped and the next one starts from that summary.
 maybe_compact() { local force="${1:-0}" c rc=0 out hf; [ -f "$sf" ] || return 0
@@ -76,7 +101,7 @@ maybe_compact() { local force="${1:-0}" c rc=0 out hf; [ -f "$sf" ] || return 0
   if [ "$force" != 1 ]; then [ "$c" -ge "$COMPACT_AT" ] || return 0; fi
   log "context at ${c}% (>= ${COMPACT_AT}%): compacting"; S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="compacting context (${c}%)"; sw
   if [ "$kind" = claude ]; then
-    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to 900 claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_PERM[@]}" --resume "$(cat "$sf")" "/compact" ) > "$B/logs/$name.compact" 2>&1 < /dev/null & supervise $! || rc=$?
+    ( cd "$cwd" && export CLAUDE_CONFIG_DIR="$dir" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name"; if [ "$COMPACT_AT" -gt 0 ]; then export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$COMPACT_AT"; else unset CLAUDE_AUTOCOMPACT_PCT_OVERRIDE; fi; run_to 900 claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_COMPACT_ARGS[@]}" "${CLAUDE_PERM[@]}" --resume "$(cat "$sf")" "/compact" ) > "$B/logs/$name.compact" 2>&1 < /dev/null & supervise $! || rc=$?
     if grep -q compact_boundary "$B/logs/$name.compact" 2>/dev/null; then log "compacted (was ${c}%)"; else log "compaction failed (rc=$rc), continuing without it"; fi
   elif [ "$kind" = kiro ]; then
     out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
@@ -119,6 +144,7 @@ manual_compact() {
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"; eff="$(cat "$B/effort/$name" 2>/dev/null)"
   if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro) MODEL_ARGS=(--model "$mdl");; esac; fi
   if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  add_codex_compact_arg
   log "manual compaction requested"; maybe_compact 1
   return 0
 }
@@ -191,6 +217,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
   if [ -n "$mdl" ]; then case "$kind" in claude|kiro) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; esac; fi
   eff="$(cat "$B/effort/$name" 2>/dev/null)"   # reasoning effort, also set by the admin (`agent effort`)
   if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  add_codex_compact_arg
   maybe_compact
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
   tmp="$(mktemp)"; rc=0
@@ -198,7 +225,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
     else id="$(newuuid)"; args=(--session-id "$id"); new=1; fi
     : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
-    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    ( cd "$cwd" && export CLAUDE_CONFIG_DIR="$dir" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name"; if [ "$COMPACT_AT" -gt 0 ]; then export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$COMPACT_AT"; else unset CLAUDE_AUTOCOMPACT_PCT_OVERRIDE; fi; run_to "$TMO" claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_COMPACT_ARGS[@]}" "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     # the reply is the final "result" event; a rejected rate-limit event tells when the limit resets
     iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
     RESET_AT="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|select(.status=="rejected")|.resetsAt' "$LIVE" 2>/dev/null | tail -1)"
@@ -221,7 +248,32 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     session_args=(); [ -f "$sf" ] && session_args=(--resume-id "$(cat "$sf")")
     trust_args=(--trust-all-tools); { [ "$BYPASS" = 0 ] || [ "$BYPASS" = safe ]; } && trust_args=(--trust-tools=fs_read,grep,glob,code,introspect)
-    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" kiro-cli chat --no-interactive --trust-workspace "${trust_args[@]}" --output-format stream-json "${MODEL_ARGS[@]}" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    (
+      cd "$cwd" || exit 1
+      settings_dir="$cwd/.kiro/settings"; settings_file="$settings_dir/cli.json"; kiro_dir="$cwd/.kiro"
+      settings_dir_existed=0; kiro_dir_existed=0; [ -d "$settings_dir" ] && settings_dir_existed=1; [ -d "$kiro_dir" ] && kiro_dir_existed=1
+      settings_backup=""; settings_existed=0; settings_link=0
+      if [ -L "$settings_file" ]; then settings_link=1
+      elif [ -f "$settings_file" ]; then settings_backup="$(mktemp)"; if [ -n "$settings_backup" ] && cp -p "$settings_file" "$settings_backup"; then settings_existed=1; else settings_link=1; settings_backup=""; fi; fi
+      cleanup_kiro_settings() {
+        if [ "$settings_link" = 0 ]; then
+          if [ "$settings_existed" = 1 ]; then cp -p "$settings_backup" "$settings_file"
+          else rm -f "$settings_file"; [ "$settings_dir_existed" = 1 ] || rmdir "$settings_dir" 2>/dev/null || true; [ "$kiro_dir_existed" = 1 ] || rmdir "$kiro_dir" 2>/dev/null || true; fi
+        fi
+        [ -z "$settings_backup" ] || rm -f "$settings_backup"
+      }
+      trap cleanup_kiro_settings EXIT
+      if [ "$settings_link" = 0 ]; then
+        mkdir -p "$settings_dir"
+        settings_ok=1
+        if [ "$COMPACT_AT" -gt 0 ]; then
+          kiro-cli settings chat.disableAutoCompaction false --workspace >/dev/null 2>&1 || settings_ok=0
+          kiro-cli settings compaction.autoCompactionThreshold "$COMPACT_AT" --workspace >/dev/null 2>&1 || settings_ok=0
+        else kiro-cli settings chat.disableAutoCompaction true --workspace >/dev/null 2>&1 || settings_ok=0; fi
+        [ "$settings_ok" = 1 ] && log "native Kiro auto-compact threshold=${COMPACT_AT}% for this order" || log "Kiro workspace compaction setting unavailable; using saved/default behavior"
+      else log "Kiro workspace compaction override skipped for linked settings file"; fi
+      BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" kiro-cli chat --no-interactive --trust-workspace "${trust_args[@]}" --output-format stream-json "${MODEL_ARGS[@]}" "${session_args[@]}" "$prompt" < /dev/null
+    ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     status="$(jq -r 'select(.type=="runFinished")|.data.status // empty' "$LIVE" 2>/dev/null | tail -1)"
     { [ -n "$status" ] && [ "$status" != success ]; } && [ "$rc" = 0 ] && rc=1
     "$(dirname "$0")/bridge-kiro-response" "$LIVE" > "$tmp"

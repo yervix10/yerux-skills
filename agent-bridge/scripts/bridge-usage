@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# bridge-usage <name>: prints one tab-separated line "model  project  branch  ctx%  5h%  week%  age_seconds  effort  5h_reset  week_reset  month%  month_reset" for an agent
-# ("-" = unknown; *_reset are epoch seconds; month = a provider window longer than a week, e.g. Codex free/go plans). Codex: read from its latest session file (the same data its UI shows). Claude: from its worker's live log.
+# bridge-usage <name>: prints model, project, branch, ctx%, 5h%, week%, age, effort, resets, month%, month reset, session credits, model window, plan credits and plan.
+# ("-" = unknown; *_reset are epoch seconds; month = provider monthly usage). Codex: read from its latest session file. Claude context is retained from its latest live log; Kiro quota is cached for five minutes.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
-now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""; credits=""
+now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""; credits=""; ctxwin=""; plan_used=""; plan_total=""; plan=""
 kind="$("$(dirname "$0")/bridge-provider" "$dir" 2>/dev/null || true)"
 case "$kind" in
   codex)
@@ -25,6 +25,7 @@ case "$kind" in
         + p(.<=600) + p(.>600 and .<=20160) + p(.>20160) | @tsv' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
       rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; h5r="$(printf '%s' "$row" | cut -f3)"
       wk="$(printf '%s' "$row" | cut -f4)"; wkr="$(printf '%s' "$row" | cut -f5)"; mo="$(printf '%s' "$row" | cut -f6)"; mor="$(printf '%s' "$row" | cut -f7)"
+      ctxwin="$(jq -r 'select(.type=="event_msg" and .payload.type=="token_count")|.payload.info.model_context_window // empty' "$f" 2>/dev/null | tail -1)"
     fi;;
   claude)
     # candidates, newest wins: (a) JSON saved by bridge-statusline, (b) the status line cache some setups keep per session
@@ -57,13 +58,21 @@ case "$kind" in
       eff="$(cat "$B/effort/$name" 2>/dev/null)"
       ctx="$(jq -r 'select(.payload.type=="session_metadata" and .payload.key=="contextUsage")|.payload.value.usagePercentage // empty' "$f" 2>/dev/null | tail -1 | awk '{printf "%d", $1+0.5}')"
       credits="$(jq -sr '[.[]|select(.payload.type=="usage_summary")|.payload.promptTurnSummaries[]?|select(.unit=="credit")|.usage|select(type=="number")]|add // empty' "$f" 2>/dev/null)"
-    fi;;
+    fi
+    quota="$("$(dirname "$0")/bridge-kiro-usage" "$name" "$B/usage" 2>/dev/null)"
+    IFS=$'\t' read -r mo mor plan_used plan_total plan _ <<< "$quota";;
 esac
-for v in model cwd ctx h5 wk at eff h5r wkr mo mor; do [ "${!v}" = - ] && printf -v "$v" ''; done
+if [ "$kind" = claude ]; then
+  ctx_cache="$B/usage/$name.last"; mkdir -p "$B/usage"
+  if [[ "$ctx" =~ ^[0-9]+$ ]]; then
+    jq -n --argjson context "$ctx" --argjson updated_at "${at:-$now}" '{context:$context,updated_at:$updated_at}' > "$ctx_cache.tmp.$$" && mv "$ctx_cache.tmp.$$" "$ctx_cache"
+  elif [ -s "$ctx_cache" ]; then ctx="$(jq -r '.context // empty' "$ctx_cache" 2>/dev/null)"; at="$(jq -r '.updated_at // empty' "$ctx_cache" 2>/dev/null)"; fi
+fi
+for v in model cwd ctx h5 wk at eff h5r wkr mo mor ctxwin plan_used plan_total plan; do [ "${!v}" = - ] && printf -v "$v" ''; done
 proj=""; br=""; if [ "$cwd" = "$HOME" ]; then proj="~"; elif [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
 age=""; [ -n "$at" ] && age=$((now - at))
 # a window whose reset moment already passed has been renewed: 0% used, reset time unknown until fresh data arrives
 for w in h5 wk mo; do r="${w}r"; [ "$w" = mo ] && r=mor; rv="${!r}"
   if [ -n "$rv" ] && [ "$rv" -le "$now" ] 2>/dev/null; then printf -v "$w" 0; printf -v "$r" ''; fi; done
 # "-" stands for unknown so tab-splitting (which collapses empty fields) keeps the columns aligned
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}" "${h5r:--}" "${wkr:--}" "${mo:--}" "${mor:--}" "${credits:--}"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}" "${h5r:--}" "${wkr:--}" "${mo:--}" "${mor:--}" "${credits:--}" "${ctxwin:--}" "${plan_used:--}" "${plan_total:--}" "${plan:--}"

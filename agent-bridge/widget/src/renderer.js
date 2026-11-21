@@ -45,7 +45,7 @@ function element(tag, className, text) {
   return node;
 }
 
-function metric({ label, used, resetsAt = null, context = false }) {
+function metric({ label, used, resetsAt = null, context = false, detail = '' }) {
   const row = element('div', `metric${context ? ' metric-context' : ''}`);
   const color = usageColor(used);
   row.append(element('span', 'metric-label', label));
@@ -76,6 +76,7 @@ function metric({ label, used, resetsAt = null, context = false }) {
     countdown.setAttribute('aria-label', `Se reinicia en ${formatCountdown(resetsAt)}`);
   }
   row.append(countdown);
+  if (detail) row.append(element('span', 'metric-extra', detail));
   return row;
 }
 
@@ -96,7 +97,22 @@ function agentCard(agent) {
   if (settings.compact) {
     const usage = highestUsage(agent);
     card.append(identity, element('span', 'compact-percent', usage === null ? '—' : `${usage}%`), element('span', 'compact-tier', Number.isFinite(agent.credit_used) ? `${agent.credit_used.toFixed(2)} cr` : agent.tier || '—'));
-    card.title = agent.detail || agent.name;
+    if (agent.monthly?.used !== null && Number.isFinite(agent.monthly?.used)) {
+      const month = element('span', 'compact-monthly', `Mes ${agent.monthly.used.toFixed(1)}%`);
+      if (Number.isFinite(agent.monthly.resets_at)) {
+        month.dataset.reset = agent.monthly.resets_at;
+        month.title = new Date(agent.monthly.resets_at * 1000).toLocaleString('es');
+      }
+      const credits = Number.isFinite(agent.monthly.credits_used) && Number.isFinite(agent.monthly.credits_total)
+        ? ` · ${agent.monthly.credits_used.toFixed(2)} / ${agent.monthly.credits_total.toFixed(0)} créditos` : '';
+      const plan = agent.monthly.plan ? ` · ${agent.monthly.plan}` : '';
+      month.dataset.detail = `${credits}${plan}`;
+      card.append(month);
+    }
+    card.title = agent.model_note || agent.detail || agent.name;
+    if (agent.data_age_s !== null) {
+      const age = element('span', 'compact-age'); age.hidden = true; age.dataset.age = agent.data_age_s; age.dataset.context = String(agent.context !== null); card.append(age);
+    }
     return card;
   }
   card.append(identity);
@@ -105,7 +121,7 @@ function agentCard(agent) {
   const model = agent.model || agent.set_model || 'Modelo sin datos';
   const effort = agent.effort || agent.set_effort;
   const modelLine = element('span', 'model-badge truncate', model);
-  modelLine.title = modelLine.textContent;
+  modelLine.title = agent.model_note || modelLine.textContent;
   metadata.append(modelLine);
   if (Number.isFinite(agent.credit_used)) metadata.append(element('span', 'effort-badge', `${agent.credit_used.toFixed(2)} créditos`));
   if (effort) metadata.append(element('span', 'effort-badge', effort));
@@ -148,6 +164,7 @@ function agentCard(agent) {
     const stale = element('p', 'stale');
     stale.hidden = true;
     stale.dataset.age = agent.data_age_s;
+    stale.dataset.context = String(agent.context !== null);
     card.append(stale);
   }
   return card;
@@ -163,7 +180,9 @@ function updateClock() {
   const now = Date.now() / 1000;
   for (const countdown of list.querySelectorAll('[data-reset]')) {
     const remaining = formatCountdown(Number(countdown.dataset.reset), now);
-    if (countdown.textContent !== remaining) countdown.textContent = remaining;
+    if (countdown.dataset.detail && !countdown.dataset.base) countdown.dataset.base = countdown.textContent;
+    const compactText = countdown.dataset.detail ? `${countdown.dataset.base} ${remaining}${countdown.dataset.detail}` : remaining;
+    if (countdown.textContent !== compactText) countdown.textContent = compactText;
     countdown.setAttribute('aria-label', `Se reinicia en ${remaining}`);
   }
   const elapsed = snapshot.data ? Math.max(0, now - snapshot.data.time) : 0;
@@ -176,8 +195,9 @@ function updateClock() {
       changed = true;
     }
     if (!hidden) {
-      const label = `Datos de hace ${Math.floor(age / 60)} min`;
+      const label = stale.dataset.context === 'true' ? `Dato de contexto de hace ${Math.floor(age / 60)} min` : `Datos de hace ${Math.floor(age / 60)} min`;
       if (stale.textContent !== label) stale.textContent = label;
+      if (stale.classList.contains('compact-age')) stale.textContent = `ctx hace ${Math.floor(age / 60)} min`;
     }
   }
   if (changed) reportLayout();

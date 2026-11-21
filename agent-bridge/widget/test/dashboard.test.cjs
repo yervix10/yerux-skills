@@ -39,6 +39,22 @@ test('acepta Kiro como worker y créditos de sesión opcionales', () => {
   assert.equal(parseDashboard(JSON.stringify({ time: 1000, agents: [kiro] })).agents[0].credit_used, 0.15);
   assert.throws(() => parseDashboard(JSON.stringify({ time: 1000, agents: [{ ...kiro, credit_used: -1 }] })));
 });
+test('muestra cuota mensual Kiro, créditos del plan y tooltip para auto', () => {
+  const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
+  const kiro = { ...agent, name: 'kiro-1', kind: 'kiro', model: 'auto', model_note: 'Kiro elige modelo por tarea',
+    monthly: { used: 14.5, resets_at: 1900000000, credits_used: 7.25, credits_total: 50, plan: 'KIRO FREE' } };
+  const parsed = parseDashboard(JSON.stringify({ time: 1000, agents: [kiro] })).agents[0];
+  assert.equal(parsed.monthly.plan, 'KIRO FREE');
+  assert.equal(parsed.model_note, 'Kiro elige modelo por tarea');
+  assert.equal(visibleMetrics(parsed).find(({ key }) => key === 'monthly').detail, '7.25 / 50 créditos · KIRO FREE');
+  assert.match(renderer, /compact-monthly/);
+  assert.match(renderer, /formatCountdown\(Number\(countdown\.dataset\.reset\), now\)/);
+});
+test('marca explícitamente el contexto guardado cuando se muestra un dato viejo', () => {
+  const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
+  assert.match(renderer, /Dato de contexto de hace/);
+  assert.match(renderer, /ctx hace/);
+});
 
 test('rechaza JSON, esquema, duplicados y métricas inválidas', () => {
   for (const input of ['{', 'null', '{"time":0,"agents":null}', '{"time":-1,"agents":[]}']) {
@@ -49,6 +65,7 @@ test('rechaza JSON, esquema, duplicados y métricas inválidas', () => {
     { context: -1 }, { data_age_s: '601' }, { model: null }, { branch: undefined },
     { five_hour: null }, { weekly: { used: -1, resets_at: null } },
     { monthly: { used: 1, resets_at: -1 } },
+    { monthly: { used: 1, resets_at: null, credits_used: -1 } },
   ]) {
     assert.throws(() => parseDashboard(JSON.stringify({ time: 0, agents: [{ ...agent, ...change }] })));
   }
