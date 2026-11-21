@@ -11,12 +11,42 @@ case "$1" in
         mkdir -p "$R/runs" "$R/logs"; if command -v setsid >/dev/null 2>&1; then setsid nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & else nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & fi; echo $! > "$R/runs/$n.pid"; echo "$n: up (pid $!)"; done;;
   down) shift; names=("$@"); [ "$1" = all ] && names=($(ls "$R/runs" 2>/dev/null | sed 's/\.pid$//'))
       for n in "${names[@]}"; do p="$(cat "$R/runs/$n.pid" 2>/dev/null)"; [ -n "$p" ] && kill "$p" 2>/dev/null && echo "$n: stopped" || echo "$n: was not up"; rm -f "$R/runs/$n.pid"; done;;
-  status) for n in $(awk -F= '{print $2}' "$R/names.conf"); do if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then echo "$n: UP"; else echo "$n: -"; fi; done;;
-  logs) tail -n "${3:-30}" "$R/logs/$2.log";;
+  status) now=$(date +%s); for n in $(awk -F= '{print $2}' "$R/names.conf"); do
+      if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then
+        sf="$R/runs/$n.state"; g() { sed -n "s/^$1=//p" "$sf" 2>/dev/null | head -1; }
+        st="$(g status)"; since="$(g since)"; beat="$(g beat)"; line="$n: UP"
+        if [ -z "$st" ]; then line="$line  (no state yet: restart it with agent down/up $n)"
+        elif [ -n "$beat" ] && [ $((now - beat)) -gt 120 ]; then line="$line  NO HEARTBEAT for $(( (now - beat) / 60 )) min: the runner looks stuck (agent down $n; agent up $n)"
+        elif [ "$st" = limited ]; then pu="$(g pause_until)"; line="$line  LIMITED, paused until $(date -d "@$pu" +%H:%M 2>/dev/null || date -r "$pu" +%H:%M)"
+        elif [ "$st" = working ]; then el=$((now - since)); line="$line  WORKING $([ $el -ge 120 ] && echo "$((el / 60)) min" || echo "${el}s")  ($(g order))"
+          ac="$(g activity)"; aa="$(g activity_at)"; [ -n "$ac" ] && line="$line  now: $ac [$(( (now - aa) ))s ago]"
+        else line="$line  idle"; lk="$(g last_kind)"; le="$(g last_end)"
+          [ -n "$lk" ] && line="$line · last order: $lk ($(date -d "@$le" +%H:%M 2>/dev/null || date -r "$le" +%H:%M 2>/dev/null))"; fi
+        echo "$line"
+      else echo "$n: -"; fi; done;;
+  wt) shift; sub="${1:-list}"; wn="$2"; root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "agent wt: run it inside a git project" >&2; exit 1; }
+      root="$(cd "$root" && cd "$(git rev-parse --git-common-dir)/.." && pwd)"; yes=0; for a in "$@"; do [ "$a" = --yes ] && yes=1; done
+      case "$sub" in
+        list) found=0; for d in "$root"/.worktrees/*/; do [ -d "$d" ] || continue; found=1; w="$(basename "$d")"; br="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+            base="$(git -C "$root" rev-parse --abbrev-ref HEAD)"; ahead="$(git -C "$root" rev-list --count "$base..$br" 2>/dev/null)"; dirty="$(git -C "$d" status --short | wc -l | tr -d ' ')"
+            echo "$w: branch $br, $ahead commit(s) ahead of $base, $dirty uncommitted file(s)"; done; [ $found = 0 ] && echo "no worktrees in $root/.worktrees";;
+        diff) [ -n "$wn" ] || { echo "usage: agent wt diff <name>" >&2; exit 1; }; git -C "$root" diff --stat "HEAD...mejora/$wn";;
+        merge) [ -n "$wn" ] || { echo "usage: agent wt merge <name> [--yes]" >&2; exit 1; }; d="$root/.worktrees/$wn"
+            [ -d "$d" ] || { echo "no worktree for $wn" >&2; exit 1; }
+            [ -z "$(git -C "$d" status --short)" ] || { echo "$wn has uncommitted changes; ask it to commit first" >&2; exit 1; }
+            [ -z "$(git -C "$root" status --short --untracked-files=no)" ] || { echo "the main checkout has uncommitted changes; commit or stash them first" >&2; exit 1; }
+            base="$(git -C "$root" rev-parse --abbrev-ref HEAD)"; echo "would merge mejora/$wn into $base:"; git -C "$root" log --oneline "$base..mejora/$wn"
+            [ $yes = 1 ] || { echo "(add --yes to merge)"; exit 0; }; git -C "$root" merge --no-ff -m "Merge mejora/$wn" "mejora/$wn";;
+        clean) [ -n "$wn" ] || { echo "usage: agent wt clean <name> [--yes]" >&2; exit 1; }; d="$root/.worktrees/$wn"
+            [ $yes = 1 ] || { echo "would remove $d and delete branch mejora/$wn if it is merged (add --yes)"; exit 0; }
+            git -C "$root" worktree remove "$d" && git -C "$root" branch -d "mejora/$wn";;
+        *) echo "agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]" >&2; exit 1;;
+      esac;;
+  logs) [ -f "$R/runs/$2.state" ] && sed -n 's/^status=/status: /p;s/^order=/order: /p;s/^activity=/doing: /p;s/^last_kind=/last result: /p' "$R/runs/$2.state"; tail -n "${3:-30}" "$R/logs/$2.log";;
   reset) rm -rf "$R/sessions/$2" && echo "memory of $2 cleared";;
   list) "$D/bridge-send" --list ;;
   inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
   listen) exec "$D/bridge-wait" ;;
-  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent admin [who|release]" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
   *) to="$1"; shift; "$D/bridge-send" "$to" "$@" ;;
 esac

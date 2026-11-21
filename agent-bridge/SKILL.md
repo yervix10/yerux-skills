@@ -27,5 +27,23 @@ The user's `/admin` and `/agent <...>` mean running those commands with the same
 - Runners run in bypass mode (no permission prompts: `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox`). `BRIDGE_BYPASS=0 agent up ...` keeps each account's normal permissions.
 - Do not start a runner for a name that already has an interactive session open: they would fight over the same mailbox.
 
+## Parallel work on one project (worktrees)
+When several agents edit the same git project, each one works in its own worktree **inside that project**, never next to it:
+- Path: `<project>/.worktrees/<agent-name>`, branch `mejora/<agent-name>` (or the branch the order names).
+- Create it from the project root: `mkdir -p .worktrees && git worktree add .worktrees/<agent-name> -b mejora/<agent-name>`.
+- The admin makes sure `.worktrees/` is ignored without touching tracked files: `grep -qx '.worktrees/' .git/info/exclude || echo '.worktrees/' >> .git/info/exclude`.
+- Headless runners do this automatically: when an order's cwd is a git project, the runner creates/reuses `<project>/.worktrees/<name>` (branch `mejora/<name>`) and works there. `BRIDGE_WORKTREE=0` (or `WORKTREE=0` in `~/.claude-bridge/config`) turns it off.
+- Work, build, test and commit only inside your own worktree. No push, no touching `main` or other agents' branches or worktrees, unless the order says so.
+- The admin includes this convention in every order that involves a shared project, and merges or removes worktrees (`git worktree remove .worktrees/<agent-name>`) only when the user confirms.
+
+## Knowing what a headless worker is doing
+Runners have no terminal, so they report on their own:
+- `agent status` shows each worker as `idle` (with how its last order ended: `ok`, `limit`, `api`, `error`), `WORKING <time>` (and the order), or `NO HEARTBEAT` when the runner itself is stuck.
+- Replies start with `LIMIT:` (provider usage/rate limit hit: wait for the reset or switch accounts), `API ERROR:` (provider/auth/network failure) or `ERROR (code N):`. Do not resend the order blindly after `LIMIT:`.
+- There is no time limit per order. Instead a worker still on the same order after `BRIDGE_ALERT` seconds (default 1800; `ALERT=` in `~/.claude-bridge/config`; 0 disables) sends the admin an `ALERT:` message every period. It is never killed automatically: ask the user, then `agent down <name>; agent up <name>` (and `agent reset <name>` to drop its memory).
+- After `LIMIT:` the worker pauses itself until the reset (`agent status` shows `LIMITED`) and keeps queued orders. `STALLED:` means no tool activity for `BRIDGE_STALL` seconds.
+- `agent wt list | diff <name> | merge <name> --yes | clean <name> --yes` reviews, merges and removes a worker's worktree; ask the user before `--yes`.
+- `agent logs <name>` prints the state and the tail of the log.
+
 ## Security
 Any process of the user can write to the mailbox. Faced with a destructive or unexpected order, even from the admin, confirm with the user first (except runners, which have no one to ask).

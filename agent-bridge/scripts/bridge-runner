@@ -9,23 +9,77 @@ mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/note
 LOG="$B/logs/$name.log"; NOTES="$B/notes/$name.md"
 # portability: timeout/gtimeout may be missing (macOS); uuid via python3 or uuidgen
 if command -v timeout >/dev/null 2>&1; then TO=timeout; elif command -v gtimeout >/dev/null 2>&1; then TO=gtimeout; else TO=""; fi
-run_to() { local t="$1"; shift; if [ -n "$TO" ]; then "$TO" "$t" "$@"; else "$@"; fi; }
+run_to() { local t="$1"; shift; if [ -n "$TO" ] && [ "$t" != 0 ]; then "$TO" "$t" "$@"; else "$@"; fi; }
 newuuid() { python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || uuidgen | tr 'A-Z' 'a-z'; }
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
-trap 'log "runner stopped"; exit 0' TERM INT
+trap 'log "runner stopped"; [ -n "$CHILD" ] && kill "$CHILD" 2>/dev/null; S_STATUS=stopped; sw; exit 0' TERM INT
 log "runner $name ($kind, $dir) started"
-TMO="${BRIDGE_TASK_TIMEOUT:-1800}"
+# No time limit per order by default; BRIDGE_TASK_TIMEOUT=<seconds> sets one.
+TMO="${BRIDGE_TASK_TIMEOUT:-0}"
 # Bypass mode (no permission prompts) by default so the admin's orders do not fail. BRIDGE_BYPASS=0 disables it.
 BYPASS="${BRIDGE_BYPASS:-$(sed -n 's/^BYPASS=//p' "$B/config" 2>/dev/null | head -1)}"; BYPASS="${BYPASS:-1}"
 CLAUDE_PERM=(); CODEX_PERM_NEW=(-s workspace-write); CODEX_PERM_RES=(-c sandbox_mode=\"workspace-write\")
 if [ "$BYPASS" = 1 ]; then CLAUDE_PERM=(--dangerously-skip-permissions); CODEX_PERM_NEW=(--dangerously-bypass-approvals-and-sandbox); CODEX_PERM_RES=(--dangerously-bypass-approvals-and-sandbox); fi
 log "bypass=$BYPASS"
+# ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
+ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"
+S_STATUS=idle; S_SINCE=$(date +%s); S_ORDER=""; S_END=""; S_RC=""; S_KIND=""; LASTBEAT=0; CHILD=""
+LIVE="$B/logs/$name.live"; S_ACT=""; S_ACT_AT=""; PAUSE_UNTIL=0; STALL="${BRIDGE_STALL:-600}"; STALLED_AT=""; LIMIT_PAUSE="${BRIDGE_LIMIT_PAUSE:-300}"
+sw() { printf 'status=%s\nsince=%s\nbeat=%s\norder=%s\nlast_end=%s\nlast_rc=%s\nlast_kind=%s\nactivity=%s\nactivity_at=%s\npause_until=%s\n' "$S_STATUS" "$S_SINCE" "$(date +%s)" "$S_ORDER" "$S_END" "$S_RC" "$S_KIND" "$S_ACT" "$S_ACT_AT" "$PAUSE_UNTIL" > "$ST.tmp" 2>/dev/null && mv "$ST.tmp" "$ST"; }
+# act: last thing a Claude worker did (tool call) and when, read from its live stream-json log
+act() { [ -s "$LIVE" ] || return 0
+  S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="assistant")|.message.content[]?|select(.type=="tool_use")|"\(.name) \((.input.command // .input.file_path // .input.pattern // .input.description // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  S_ACT_AT="$(stat -c %Y "$LIVE" 2>/dev/null || stat -f %m "$LIVE" 2>/dev/null)"; return 0; }
+beat() { local n; n=$(date +%s); [ $((n - LASTBEAT)) -ge 5 ] && { LASTBEAT=$n; [ "$S_STATUS" = working ] && [ "$kind" = claude ] && act; sw; }; return 0; }
+notify_admin() { local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
+# supervise <pid>: waits for the order's process, keeps the heartbeat and warns the admin every $ALERT seconds (it never kills it)
+supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
+  while kill -0 "$pid" 2>/dev/null; do sleep 2; beat; el=$(( $(date +%s) - t0 ))
+    if [ "$STALL" -gt 0 ] && [ -n "$S_ACT_AT" ] && [ $(( $(date +%s) - S_ACT_AT )) -ge "$STALL" ] && [ "$STALLED_AT" != "$S_ACT_AT" ]; then STALLED_AT="$S_ACT_AT"
+      log "no activity for $(( ($(date +%s) - S_ACT_AT) / 60 )) min"
+      notify_admin "STALLED: worker '$name' has produced no activity for $(( ($(date +%s) - S_ACT_AT) / 60 )) min (last: ${S_ACT:-none}). It may be hung or waiting on the provider. Check: agent status | agent logs $name"; fi
+    if [ "$ALERT" -gt 0 ] && [ $el -ge $(( (n + 1) * ALERT )) ]; then n=$((n + 1))
+      log "still working after $((el / 60)) min: $S_ORDER"
+      notify_admin "ALERT: worker '$name' has been on the same order for $(if [ $el -ge 120 ]; then echo "$((el / 60)) min"; else echo "${el}s"; fi) and has not replied yet (still running, not killed). Order: $S_ORDER. Check: agent status | agent logs $name | agent reset $name"; fi; done
+  wait "$pid"; local rc=$?; CHILD=""; return $rc; }
+# classify <rc> <text> -> ok | limit | api | timeout | error
+classify() { local rc="$1" low; low="$(printf '%s' "$2" | tr 'A-Z' 'a-z')"
+  [ "$rc" = 124 ] && { echo timeout; return; }
+  if [ "$rc" != 0 ]; then
+    case "$low" in *"usage limit"*|*"rate limit"*|*"rate_limit"*|*"limit reached"*|*"hit your limit"*|*quota*|*"too many requests"*|*"credit balance"*|*"limit will reset"*|*"resets at"*|*"resets in"*) echo limit; return;;
+      *overloaded*|*"api error"*|*"authentication"*|*"invalid api key"*|*"invalid x-api-key"*|*econnrefused*|*econnreset*|*"network error"*|*"503"*|*"529"*|*"502"*|*"401"*|*unauthorized*) echo api; return;; esac
+    echo error; return; fi
+  if [ ${#2} -lt 300 ]; then case "$low" in *"usage limit"*|*"rate limit"*|*"limit reached"*|*"hit your limit"*) echo limit; return;; esac; fi
+  echo ok; }
+sw
+# Worktrees: when the order's cwd is a git project, the worker runs in its own worktree <project>/.worktrees/<name>
+# (branch mejora/<name>) so several workers never edit the same checkout. BRIDGE_WORKTREE=0 disables it.
+WT="${BRIDGE_WORKTREE:-$(sed -n 's/^WORKTREE=//p' "$B/config" 2>/dev/null | head -1)}"; WT="${WT:-1}"
+log "worktree=$WT"
+worktree_for() { # <cwd> -> prints the cwd to use (the worktree path, or the original one)
+  local c="$1" root gd common rel wt
+  [ "$WT" = 1 ] && command -v git >/dev/null 2>&1 || { printf '%s' "$c"; return; }
+  root="$(git -C "$c" rev-parse --show-toplevel 2>/dev/null)" || { printf '%s' "$c"; return; }
+  gd="$(git -C "$c" rev-parse --absolute-git-dir 2>/dev/null)"; common="$(cd "$c" && cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+  case "$gd" in "$common"/worktrees/*) printf '%s' "$c"; return;; esac   # already inside a linked worktree
+  rel="${c#$root}"; wt="$root/.worktrees/$name"
+  if [ ! -d "$wt" ]; then
+    mkdir -p "$root/.worktrees"
+    grep -qx '.worktrees/' "$common/info/exclude" 2>/dev/null || { mkdir -p "$common/info"; echo '.worktrees/' >> "$common/info/exclude"; }
+    if git -C "$root" show-ref --verify --quiet "refs/heads/mejora/$name"; then git -C "$root" worktree add "$wt" "mejora/$name" >/dev/null 2>&1
+    else git -C "$root" worktree add "$wt" -b "mejora/$name" >/dev/null 2>&1; fi \
+      || { log "worktree failed in $root, using $c"; printf '%s' "$c"; return; }
+    log "worktree created: $wt"
+  fi
+  [ -d "$wt$rel" ] && printf '%s' "$wt$rel" || printf '%s' "$wt"; }
 while true; do
   f="$(ls "$B/inbox/$name"/*.msg 2>/dev/null | sort | head -1)"
-  [ -n "$f" ] || { sleep 1; continue; }
+  if [ "$(date +%s)" -lt "$PAUSE_UNTIL" ]; then [ "$S_STATUS" = limited ] || { S_STATUS=limited; sw; }; beat; sleep 2; continue; fi
+  [ "$S_STATUS" = limited ] && { S_STATUS=idle; sw; }
+  [ -n "$f" ] || { beat; sleep 1; continue; }
   sleep 0.3
   base="$(basename "$f" .msg)"; from="${base##*-de-}"
-  cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"
+  cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"; cwd="$(worktree_for "$cwd")"
   body="$(awk 'f{print} /^$/ && !f{f=1}' "$f")"
   mv "$f" "$B/read/$name/"
   if [ "$from" != "$(cat "$B/admin" 2>/dev/null)" ]; then log "ignored (not from the admin): from $from"; continue; fi
@@ -36,25 +90,44 @@ while true; do
 Order:
 $body"
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
+  S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
   tmp="$(mktemp)"; rc=0
   if [ "$kind" = claude ]; then
     if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
     else id="$(newuuid)"; args=(--session-id "$id"); new=1; fi
-    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$tmp" 2>&1 || rc=$?
+    : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p --output-format stream-json --verbose "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    # the reply is the final "result" event; a rejected rate-limit event tells when the limit resets
+    iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
+    RESET_AT="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|select(.status=="rejected")|.resetsAt' "$LIVE" 2>/dev/null | tail -1)"
+    jq -r 'select(.type=="result")|.result // empty' "$LIVE" 2>/dev/null > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 2000 "$LIVE"; } > "$tmp" 2>/dev/null
     [ "$new" = 1 ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
   else
     out="$(mktemp)"
     if [ -f "$sf" ]; then
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 || rc=$?
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 & supervise $! || rc=$?
     else
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 || rc=$?
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 & supervise $! || rc=$?
       id="$(grep -o -m1 '"\(thread_id\|session_id\|conversation_id\)":"[^"]*"' "$tmp.log" | head -1 | cut -d'"' -f4)"
       [ "$rc" = 0 ] && [ -n "$id" ] && echo "$id" > "$sf"
     fi
     cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || tail -c 2000 "$tmp.log" > "$tmp"; rm -f "$out" "$tmp.log"
   fi
   res="$(head -c 6000 "$tmp")"; rm -f "$tmp"
-  [ "$rc" = 0 ] || res="ERROR (code $rc): $res"
+  verdict="$(classify "$rc" "$res")"
+  case "$verdict" in
+    limit)
+      [ -n "${RESET_AT:-}" ] || RESET_AT="$(printf '%s' "$res" | grep -o '|[0-9]\{10\}' | head -1 | tr -d '|')"
+      now=$(date +%s); if [ -n "$RESET_AT" ] && [ "$RESET_AT" -gt "$now" ] 2>/dev/null; then PAUSE_UNTIL=$RESET_AT; else PAUSE_UNTIL=$((now + LIMIT_PAUSE)); fi
+      [ $PAUSE_UNTIL -gt $((now + 43200)) ] && PAUSE_UNTIL=$((now + 43200))
+      res="LIMIT: the provider's usage/rate limit was hit. This worker pauses until $(date -d "@$PAUSE_UNTIL" +%H:%M 2>/dev/null || date -r "$PAUSE_UNTIL" +%H:%M) and keeps queued orders; resend or reassign if urgent. Output: $res"
+      log "limit hit: paused until $PAUSE_UNTIL";;
+    api) res="API ERROR: the provider or the account failed (code $rc). Output: $res";;
+    timeout) res="TIMEOUT after ${TMO}s: $res";;
+    error) res="ERROR (code $rc): $res";;
+  esac
+  RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END; sw
   [ -n "$res" ] || res="(no output)"
   BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$from" "$res" >/dev/null
   echo "- $(date '+%F %T') from $from [$cwd] rc=$rc: $(printf '%s' "$body" | head -c 100 | tr '\n' ' ')" >> "$NOTES"

@@ -85,6 +85,10 @@ function Test-Up($n) { $pf = Join-Path $B "runs\$n.pid"; if (-not (Test-Path $pf
   $p = (Read-Text $pf).Trim(); if (-not $p) { return $false }
   return [bool](Get-Process -Id ([int]$p) -ErrorAction SilentlyContinue) }
 
+function Get-Epoch { return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+function Read-State($n) { $h = @{}; $f = Join-Path $B "runs\$n.state"
+  if (Test-Path $f) { foreach ($l in (Get-Content $f -Encoding UTF8 -ErrorAction SilentlyContinue)) { $p = $l.Split('=', 2); if ($p.Count -eq 2) { $h[$p[0]] = $p[1] } } }
+  return $h }
 function Invoke-Agent($a) {
   switch ($a[0]) {
     'ping'   { Send-Msg $a[1] "ping from $me ($((Get-Date).ToString('HH:mm:ss')))" }
@@ -108,8 +112,18 @@ function Invoke-Agent($a) {
       foreach ($n in $names) {
         if (Test-Up $n) { Stop-Process -Id ([int](Read-Text (Join-Path $B "runs\$n.pid")).Trim()) -Force; Write-Output "${n}: stopped" } else { Write-Output "${n}: was not up" }
         Remove-Item (Join-Path $B "runs\$n.pid") -Force -ErrorAction SilentlyContinue } }
-    'status' { foreach ($n in (Get-Names)) { if (Test-Up $n) { Write-Output "${n}: UP" } else { Write-Output "${n}: -" } } }
-    'logs'   { $lf = Join-Path $B "logs\$($a[1]).log"; if (Test-Path $lf) { Get-Content $lf -Tail 30 } }
+    'status' {
+      $now = Get-Epoch
+      foreach ($n in (Get-Names)) {
+        if (-not (Test-Up $n)) { Write-Output "${n}: -"; continue }
+        $st = Read-State $n; $line = "${n}: UP"
+        if (-not $st.status) { $line += '  (no state yet: restart it with agent down/up)' }
+        elseif ($st.beat -and ($now - [int64]$st.beat) -gt 120) { $line += "  NO HEARTBEAT for $([int](($now - [int64]$st.beat) / 60)) min: the runner looks stuck (agent down $n; agent up $n)" }
+        elseif ($st.status -eq 'working') { $el = $now - [int64]$st.since; $line += "  WORKING $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" })  ($($st.order))" }
+        else { $line += '  idle'; if ($st.last_kind) { $line += " $([char]0xB7) last order: $($st.last_kind) ($([DateTimeOffset]::FromUnixTimeSeconds([int64]$st.last_end).LocalDateTime.ToString('HH:mm')))" } }
+        Write-Output $line } }
+    'logs'   { $st = Read-State $a[1]; if ($st.status) { Write-Output "status: $($st.status)"; if ($st.order) { Write-Output "order: $($st.order)" }; if ($st.last_kind) { Write-Output "last result: $($st.last_kind)" } }
+      $lf = Join-Path $B "logs\$($a[1]).log"; if (Test-Path $lf) { Get-Content $lf -Tail 30 } }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
       Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent admin [who|release]' }
@@ -124,14 +138,55 @@ function Invoke-Runner($name) {
   foreach ($d in @("inbox\$name", "read\$name", 'logs', "sessions\$name", 'notes', 'runs')) { Ensure-Dir (Join-Path $B $d) }
   $logf = Join-Path $B "logs\$name.log"; $notes = Join-Path $B "notes\$name.md"
   function Log($m) { Add-Content -Path $logf -Value "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) $m" -Encoding UTF8 }
-  $tmo = if ($env:BRIDGE_TASK_TIMEOUT) { [int]$env:BRIDGE_TASK_TIMEOUT } else { 1800 }
+  $tmo = if ($env:BRIDGE_TASK_TIMEOUT) { [int]$env:BRIDGE_TASK_TIMEOUT } else { 0 }  # 0 = no time limit
   $cfgBypass = ([regex]::Match((Read-Text (Join-Path $B 'config')), 'BYPASS=(\d)')).Groups[1].Value
   $bypass = if ($env:BRIDGE_BYPASS) { $env:BRIDGE_BYPASS -ne '0' } elseif ($cfgBypass) { $cfgBypass -ne '0' } else { $true }
   Log "runner $name ($kind, $dir) started; bypass=$bypass"
   $exe = (Get-Command $kind -ErrorAction Stop).Source
+  # Worktrees: in a git project the worker runs in <project>\.worktrees\<name> (branch mejora/<name>). BRIDGE_WORKTREE=0 disables it.
+  $cfgWt = ([regex]::Match((Read-Text (Join-Path $B 'config')), 'WORKTREE=(\d)')).Groups[1].Value
+  $useWt = if ($env:BRIDGE_WORKTREE) { $env:BRIDGE_WORKTREE -ne '0' } elseif ($cfgWt) { $cfgWt -ne '0' } else { $true }
+  Log "worktree=$useWt"
+  function Get-WorktreeCwd($c) {
+    if (-not $useWt -or -not (Get-Command git -ErrorAction SilentlyContinue)) { return $c }
+    $root = (& git -C $c rev-parse --show-toplevel 2>$null); if ($LASTEXITCODE -ne 0 -or -not $root) { return $c }
+    $root = ([string]$root).Trim() -replace '/', '\'
+    $gd = ([string](& git -C $c rev-parse --absolute-git-dir 2>$null)).Trim() -replace '/', '\'
+    if ($gd -match '\\worktrees\\[^\\]+$') { return $c }   # already inside a linked worktree
+    $common = ([string](& git -C $c rev-parse --path-format=absolute --git-common-dir 2>$null)).Trim() -replace '/', '\'
+    $wt = Join-Path $root ".worktrees\$name"
+    if (-not (Test-Path $wt)) {
+      Ensure-Dir (Join-Path $root '.worktrees')
+      $ex = Join-Path $common 'info\exclude'; Ensure-Dir (Split-Path $ex -Parent)
+      if (-not ((Test-Path $ex) -and ((Get-Content $ex) -contains '.worktrees/'))) { Add-Content -Path $ex -Value '.worktrees/' -Encoding UTF8 }
+      & git -C $root show-ref --verify --quiet "refs/heads/mejora/$name"
+      if ($LASTEXITCODE -eq 0) { & git -C $root worktree add $wt "mejora/$name" 2>&1 | Out-Null } else { & git -C $root worktree add $wt -b "mejora/$name" 2>&1 | Out-Null }
+      if ($LASTEXITCODE -ne 0) { Log "worktree failed in $root, using $c"; return $c }
+      Log "worktree created: $wt" }
+    $rel = $c.Substring([Math]::Min($c.Length, $root.Length)).TrimStart('\')
+    $cand = if ($rel) { Join-Path $wt $rel } else { $wt }
+    if (Test-Path $cand -PathType Container) { return $cand } else { return $wt } }
+  # ---- observability: state file (read by `agent status`), heartbeat and alerts to the admin ----
+  $alert = if ($env:BRIDGE_ALERT) { [int]$env:BRIDGE_ALERT } else { $a2 = ([regex]::Match((Read-Text (Join-Path $B 'config')), 'ALERT=(\d+)')).Groups[1].Value; if ($a2) { [int]$a2 } else { 1800 } }
+  $stf = Join-Path $B "runs\$name.state"
+  $st = @{ status = 'idle'; since = (Get-Epoch); order = ''; last_end = ''; last_rc = ''; last_kind = ''; beatAt = 0 }
+  function Write-State { $st.beatAt = Get-Epoch
+    $t = "status=$($st.status)`nsince=$($st.since)`nbeat=$(Get-Epoch)`norder=$($st.order)`nlast_end=$($st.last_end)`nlast_rc=$($st.last_rc)`nlast_kind=$($st.last_kind)`n"
+    try { Write-Text $stf $t } catch {} }
+  function Beat { if ((Get-Epoch) - $st.beatAt -ge 5) { Write-State } }
+  function Classify($rc, $text) {
+    $low = $text.ToLower()
+    if ($rc -eq 124) { return 'timeout' }
+    if ($rc -ne 0) {
+      if ($low -match 'usage limit|rate limit|rate_limit|limit reached|hit your limit|quota|too many requests|credit balance|limit will reset|resets at|resets in') { return 'limit' }
+      if ($low -match 'overloaded|api error|authentication|invalid api key|invalid x-api-key|econnrefused|econnreset|network error|503|529|502|401|unauthorized') { return 'api' }
+      return 'error' }
+    if ($text.Length -lt 300 -and $low -match 'usage limit|rate limit|limit reached|hit your limit') { return 'limit' }
+    return 'ok' }
+  Write-State
   while ($true) {
     $f = Get-ChildItem (Join-Path $B "inbox\$name") -Filter '*.msg' -File -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
-    if (-not $f) { Start-Sleep -Seconds 1; continue }
+    if (-not $f) { Beat; Start-Sleep -Seconds 1; continue }
     Start-Sleep -Milliseconds 300
     $raw = Read-Text $f.FullName; $base = [IO.Path]::GetFileNameWithoutExtension($f.Name)
     $from = $base.Substring($base.LastIndexOf('-de-') + 4)
@@ -139,6 +194,7 @@ function Invoke-Runner($name) {
     $lines = $raw -split "`r?`n"; $cwd = $HOME
     foreach ($l in $lines) { if ($l -like 'Cwd: *') { $cwd = $l.Substring(5); break } }
     if (-not (Test-Path $cwd -PathType Container)) { $cwd = $HOME }
+    $cwd = Get-WorktreeCwd $cwd
     $idx = [Array]::IndexOf($lines, ''); $body = if ($idx -ge 0) { ($lines[($idx + 1)..($lines.Count - 1)] -join "`n").Trim() } else { '' }
     $admin = (Read-Text (Join-Path $B 'admin')).Trim()
     if ($from -ne $admin) { Log "ignored (not from the admin): from $from"; continue }
@@ -148,6 +204,7 @@ function Invoke-Runner($name) {
     if ($body -like '--new*') { Remove-Item $sf -Force -ErrorAction SilentlyContinue; $body = ($body.Substring(5)).Trim() }
     $prompt = "You are worker '$name' in a team of coordinated sessions. The admin '$from' gives you this order. Carry it out with your tools and reply ONLY with the final result, briefly: your reply is sent to '$from' automatically.`n`nOrder:`n$body"
     Log "order from $from in ${cwd}: $($body.Substring(0, [Math]::Min(120, $body.Length)) -replace '\s+', ' ')"
+    $st.status = 'working'; $st.since = (Get-Epoch); $st.order = ($body.Substring(0, [Math]::Min(100, $body.Length)) -replace '\s+', ' '); Write-State
     $envs = @{ BRIDGE_NO_HOOK = '1'; BRIDGE_NAME = $name }
     $newId = $null; $outFile = $null
     if ($kind -eq 'claude') {
@@ -163,16 +220,30 @@ function Invoke-Runner($name) {
       param($cwd, $envs, $exe, $cargs, $prompt)
       Set-Location $cwd; foreach ($k in $envs.Keys) { Set-Item "env:$k" $envs[$k] }
       $out = ($prompt | & $exe @cargs 2>&1 | Out-String); [pscustomobject]@{ Out = $out; Rc = $LASTEXITCODE } } -ArgumentList $cwd, $envs, $exe, $cargs, $prompt
-    $rc = 0; $res = ''
-    if (Wait-Job $job -Timeout $tmo) { $r = Receive-Job $job; $rc = [int]$r.Rc; $res = [string]$r.Out } else { Stop-Job $job; $rc = 124; $res = 'timeout' }
-    Remove-Job $job -Force
+    $rc = 0; $res = ''; $t0 = Get-Epoch; $nAlert = 0
+    while ($true) {
+      if (Wait-Job $job -Timeout 2) { $r = Receive-Job $job; $rc = [int]$r.Rc; $res = [string]$r.Out; break }
+      Beat; $el = (Get-Epoch) - $t0
+      if ($tmo -gt 0 -and $el -ge $tmo) { Stop-Job $job; $rc = 124; $res = 'timeout'; break }
+      if ($alert -gt 0 -and $el -ge (($nAlert + 1) * $alert)) {
+        $nAlert++; Log "still working after $([int]($el / 60)) min: $($st.order)"
+        $adm = (Read-Text (Join-Path $B 'admin')).Trim()
+        if ($adm) { $script:me = $name; Send-Msg $adm "ALERT: worker '$name' has been on the same order for $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" }) and has not replied yet (still running, not killed). Order: $($st.order). Check: agent status | agent logs $name | agent reset $name" | Out-Null } } }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
     if ($kind -eq 'codex') {
       if ($rc -eq 0 -and $res -match '"thread_id"\s*:\s*"([^"]+)"') { Write-Text $sf $Matches[1] }
       $last = Read-Text $outFile; Remove-Item $outFile -Force -ErrorAction SilentlyContinue
       if ($last.Trim()) { $res = $last }
     } elseif ($newId -and $rc -eq 0) { Write-Text $sf $newId }
     $res = $res.Trim(); if ($res.Length -gt 6000) { $res = $res.Substring(0, 6000) }
-    if ($rc -ne 0) { $res = "ERROR (code $rc): $res" }; if (-not $res) { $res = '(no output)' }
+    $verdict = Classify $rc $res
+    switch ($verdict) {
+      'limit' { $res = "LIMIT: the provider's usage/rate limit was hit (it may reset later). Output: $res" }
+      'api' { $res = "API ERROR: the provider or the account failed (code $rc). Output: $res" }
+      'timeout' { $res = "TIMEOUT after ${tmo}s: $res" }
+      'error' { $res = "ERROR (code ${rc}): $res" } }
+    if (-not $res) { $res = '(no output)' }
+    $st.status = 'idle'; $st.order = ''; $st.last_end = (Get-Epoch); $st.last_rc = $rc; $st.last_kind = $verdict; $st.since = $st.last_end; Write-State
     $script:me = $name; Send-Msg $from $res | Out-Null
     Add-Content -Path $notes -Value "- $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) from $from [$cwd] rc=${rc}: $($body.Substring(0, [Math]::Min(100, $body.Length)) -replace '\s+', ' ')" -Encoding UTF8
     Log "replied to $from (rc=$rc)" } }
