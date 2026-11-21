@@ -14,7 +14,7 @@ const command = process.argv.includes('--widget-status') ? 'status'
   : process.argv.includes('--widget-stop') ? 'stop'
     : process.argv.includes('--widget-start') ? 'start' : 'show';
 const capture = process.argv.includes('--capture');
-const defaults = { alwaysOnTop: true, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency' };
+const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency' };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
 
 let window;
@@ -41,6 +41,7 @@ function readSettings() {
     const stored = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     return {
       alwaysOnTop: stored.alwaysOnTop !== false,
+      showInTaskbar: stored.showInTaskbar === true,
       collapsed: stored.collapsed === true,
       interval: intervals.includes(stored.interval) ? stored.interval : defaults.interval,
       compact: stored.compact === true,
@@ -92,6 +93,17 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Mostrar', click: showWindow },
     { label: 'Ocultar', click: () => window.hide() },
+    {
+      label: 'Mostrar en la barra de tareas',
+      type: 'checkbox',
+      checked: settings.showInTaskbar,
+      click: ({ checked }) => {
+        settings.showInTaskbar = checked;
+        window.setSkipTaskbar(!checked);
+        saveSettings();
+        updateTray();
+      },
+    },
     {
       label: 'Siempre visible',
       type: 'checkbox',
@@ -167,6 +179,11 @@ async function captureWindow() {
 async function createWidget() {
   settings = readSettings();
 
+  if (process.platform === 'darwin') {
+    app.dock?.hide();
+    app.setActivationPolicy?.('accessory');
+  }
+
   const local = session.fromPartition('widget');
   const files = new Set(['index.html', 'style.css', 'renderer.js', 'metrics.js'].map(
     (name) => pathToFileURL(path.join(__dirname, name)).href,
@@ -182,6 +199,9 @@ async function createWidget() {
     transparent: true,
     backgroundColor: '#00000000',
     title: 'Agent Bridge',
+    skipTaskbar: !settings.showInTaskbar,
+    ...(process.platform === 'win32' ? { type: 'toolbar' } : {}),
+    ...(process.platform === 'linux' ? { type: process.env.BRIDGE_WIDGET_X11 === '1' ? 'toolbar' : 'utility' } : {}),
     // Wayland requires a resizable surface for the compositor to accept smaller dimensions.
     resizable: process.platform === 'linux',
     movable: true,
