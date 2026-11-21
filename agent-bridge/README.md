@@ -26,6 +26,8 @@ ignored via `.git/info/exclude`). Disable with `BRIDGE_WORKTREE=0`. Manage them 
 
 Monitoring: `agent status` (idle / WORKING + last tool / LIMITED / NO HEARTBEAT). Env: `BRIDGE_ALERT` (seconds, default 1800),
 `BRIDGE_STALL` (no-activity seconds, default 600), `BRIDGE_LIMIT_PAUSE` (default 300). Check the install with `./install.sh --check`.
+`agent refresh [name|all]` makes one tiny request per Claude account so the dashboard has fresh numbers (a few tokens each).
+On setups that keep a per-session status line cache (`~/.cache/lordos/claude/*.json`) the interactive agents are read from it automatically.
 `agent dashboard` shows every agent live, like the status line: `model | project | branch | ctx % | 5h % | sem %` + its state.
 Codex data comes from its latest session file; Claude data from the worker's live log, or from the real status line JSON if you install
 with `./install.sh --statusline` (wraps the account's status line, which keeps looking the same; `--uninstall` restores it). Desktop notifications on alerts/limits/errors (`BRIDGE_NOTIFY=0` to mute).

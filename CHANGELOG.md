@@ -6,6 +6,10 @@
   (`bridge-usage`). Claude agents: worker live log, or the saved status line JSON with `./install.sh --statusline`
   (a wrapper that keeps the original bar; `--uninstall` restores it). Windows: Codex and Claude worker data, no status line wrapper.
 
+## 1.3.1
+- Dashboard: Claude agents now load. Interactive sessions are read from the status line cache when present, workers from their live
+  log (now with context % from the usage and the model's window), and `agent refresh` fills the rest with one tiny request per account.
+
 ## 1.2.0
 - CI (GitHub Actions): shell syntax + `tests/run.sh` on Linux, macOS (best effort), PowerShell parse on Windows.
 - Tests now cover Codex workers, reassignment, `agent wt`, and install / `--check` / `--fix` / uninstall in an isolated HOME.

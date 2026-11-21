@@ -20,8 +20,14 @@ case "$(basename "$dir")" in
       rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; wk="$(printf '%s' "$row" | cut -f3)"
     fi;;
   .claude*)
-    f="$B/logs/$name.live"; u="$B/usage/$name.json"
-    # interactive session: the JSON saved by bridge-statusline (installer --statusline) is the freshest source
+    # candidates, newest wins: (a) JSON saved by bridge-statusline, (b) the status line cache some setups keep per session
+    # (~/.cache/lordos/claude/<session>.json, matched by its transcript path), (c) the worker's live stream-json log
+    f="$B/logs/$name.live"; [ "$B/logs/$name.probe" -nt "$f" ] && f="$B/logs/$name.probe"   # probe = `agent refresh`
+    u="$B/usage/$name.json"; cache="${BRIDGE_STATUS_CACHE:-$HOME/.cache/lordos/claude}"
+    if [ -d "$cache" ]; then
+      c="$(for x in "$cache"/*.json; do [ -f "$x" ] && jq -r --arg d "$dir/projects/" 'select((.transcript_path // "")|startswith($d))|input_filename' "$x" 2>/dev/null; done | xargs -r ls -t 2>/dev/null | head -1)"
+      [ -n "$c" ] && { [ ! -s "$u" ] || [ "$c" -nt "$u" ]; } && u="$c"
+    fi
     if [ -s "$u" ] && { [ ! -s "$f" ] || [ "$u" -nt "$f" ]; }; then
       at="$(stat -c %Y "$u" 2>/dev/null || stat -f %m "$u" 2>/dev/null)"
       model="$(jq -r '.model.display_name // empty' "$u" 2>/dev/null)"; cwd="$(jq -r '.workspace.current_dir // .cwd // empty' "$u" 2>/dev/null)"
@@ -33,9 +39,13 @@ case "$(basename "$dir")" in
       cwd="$(jq -r 'select(.type=="system" and .subtype=="init")|.cwd' "$f" 2>/dev/null | tail -1)"
       row="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|[((.unifiedWindows.five_hour.utilization // empty)*100|floor), ((.unifiedWindows.seven_day.utilization // empty)*100|floor)]|@tsv' "$f" 2>/dev/null | tail -1)"
       h5="$(printf '%s' "$row" | cut -f1)"; wk="$(printf '%s' "$row" | cut -f2)"
+      # context: tokens of the last assistant message over the model's window (reported in the result event)
+      used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0)+(.cache_creation_input_tokens // 0))' "$f" 2>/dev/null | tail -1)"
+      win="$(jq -r 'select(.type=="result")|.modelUsage|to_entries[0].value.contextWindow // empty' "$f" 2>/dev/null | tail -1)"
+      [ -n "$used" ] && [ -n "$win" ] && ctx=$((used * 100 / win))
     fi;;
 esac
-proj=""; br=""; if [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
+proj=""; br=""; if [ "$cwd" = "$HOME" ]; then proj="~"; elif [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
 age=""; [ -n "$at" ] && age=$((now - at))
 # "-" stands for unknown so tab-splitting (which collapses empty fields) keeps the columns aligned
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}"

@@ -120,6 +120,10 @@ check "wrapper keeps the original bar" "$OUT" "ORIG-BAR"
 UN="$(awk -F= '{print $2}' "$H2/.claude-bridge/names.conf" | head -1)"
 printf '{"model":{"display_name":"Sonnet"},"workspace":{"current_dir":"%s"},"context_window":{"used_percentage":30},"rate_limits":{"five_hour":{"used_percentage":50},"seven_day":{"used_percentage":70}}}' "$T/proj" | BRIDGE_DIR="$H2/.claude-bridge" BRIDGE_NAME="$UN" "$H2/.claude-bridge/bin/bridge-statusline" >/dev/null
 check "claude usage from the saved JSON" "$(BRIDGE_DIR="$H2/.claude-bridge" "$H2/.claude-bridge/bin/bridge-usage" "$UN" | cut -f1,4,5,6 | tr '\t' ' ')" "Sonnet 30 50 70"
+# status line cache of another setup (matched by the transcript path of the account)
+mkdir -p "$T/sc"; printf '{"transcript_path":"%s/projects/x/s.jsonl","model":{"display_name":"Opus"},"cwd":"%s","context_window":{"used_percentage":12},"rate_limits":{"five_hour":{"used_percentage":33},"seven_day":{"used_percentage":44}}}' "$H2/.claude-a" "$T/proj" > "$T/sc/s1.json"
+rm -f "$H2/.claude-bridge/usage"/*.json
+check "claude usage from a status line cache" "$(BRIDGE_STATUS_CACHE="$T/sc" BRIDGE_DIR="$H2/.claude-bridge" "$H2/.claude-bridge/bin/bridge-usage" "$UN" | cut -f1,4,5,6 | tr '\t' ' ')" "Opus 12 33 44"
 ( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --uninstall --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
 check "uninstall restores the original status line" "$(jq -r '.statusLine.command' "$H2/.claude-a/settings.json")" "echo ORIG-BAR"
 

@@ -42,6 +42,12 @@ case "$1" in
             git -C "$root" worktree remove "$d" && git -C "$root" branch -d "mejora/$wn";;
         *) echo "agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]" >&2; exit 1;;
       esac;;
+  refresh) shift; names=("$@"); { [ -z "$1" ] || [ "$1" = all ]; } && names=($(awk -F= '{print $2}' "$R/names.conf"))
+      # one tiny request per Claude account so the dashboard has fresh model / context / 5h / weekly numbers (costs a few tokens)
+      for n in "${names[@]}"; do dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$R/names.conf")"
+        case "$(basename "$dir")" in .claude*) mkdir -p "$R/logs"
+          ( cd "$HOME" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$n" CLAUDE_CONFIG_DIR="$dir" claude -p --no-session-persistence --output-format stream-json --verbose "Reply with exactly: ok" > "$R/logs/$n.probe.tmp" 2>/dev/null ) && mv "$R/logs/$n.probe.tmp" "$R/logs/$n.probe" && echo "$n: refreshed" || { rm -f "$R/logs/$n.probe.tmp"; echo "$n: failed (is claude logged in there?)"; };;
+          *) echo "$n: Codex data comes from its sessions, nothing to refresh";; esac; done;;
   dashboard) trap 'printf "\033[?25h"; exit 0' INT TERM; printf '\033[?25l'
       pct() { # <value> -> "47%" coloured by how full it is
         [ -z "$1" ] && { printf '\033[2m–\033[0m'; return; }; c=32; [ "$1" -ge 60 ] && c=33; [ "$1" -ge 85 ] && c=31; printf '\033[%sm%s%%\033[0m' "$c" "$1"; }
@@ -60,6 +66,6 @@ case "$1" in
   list) "$D/bridge-send" --list ;;
   inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
   listen) exec "$D/bridge-wait" ;;
-  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
   *) to="$1"; shift; "$D/bridge-send" "$to" "$@" ;;
 esac
