@@ -102,7 +102,7 @@ function Assign($d, $prefix) {
   $n = $Over[$d]; if (-not $n) { $n = $Map[$d] }; if (-not $n) { $n = Existing-Name $d }; if (-not $n) { $n = Next-Name $prefix }
   if ($n -notmatch '^[A-Za-z0-9_-]+$') { throw "invalid name for ${d}: '$n'" }
   $Map[$d] = $n }
-foreach ($d in $Claude) { Assign $d 'agent' }
+foreach ($d in $Claude) { Assign $d 'claude' }
 foreach ($d in $Codex) { Assign $d 'codex' }
 
 if ($List) {

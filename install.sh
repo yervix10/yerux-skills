@@ -104,7 +104,7 @@ assign() { # dir prefix
   [ -z "$n" ] && n="$(get_name "$d")"; [ -z "$n" ] && n="$(existing_name "$d")"; [ -z "$n" ] && n="$(next_name "$2")"
   case "$n" in *[!A-Za-z0-9_-]*|"") die "invalid name for $d: '$n'";; esac
   set_name "$d" "$n"; }
-while IFS= read -r d; do [ -n "$d" ] && assign "$d" agent; done <<EOF2
+while IFS= read -r d; do [ -n "$d" ] && assign "$d" claude; done <<EOF2
 $CLAUDE_LIST
 EOF2
 while IFS= read -r d; do [ -n "$d" ] && assign "$d" codex; done <<EOF2
