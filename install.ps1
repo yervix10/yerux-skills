@@ -33,7 +33,7 @@ function Ui-Box($title, $lines) {
 $script:Fast = $false
 function Ui-Sleep { if (-not $script:Fast) { Start-Sleep -Milliseconds 50 } }
 function Ui-Banner {
-  $w = 50; $t1 = '  yerux - skills  installer   v1.1.0'; $t2 = '  * featured: agent-bridge'
+  $w = 50; $t1 = '  yerux - skills  installer   v1.2.0'; $t2 = '  * featured: agent-bridge'
   Say ''; Ui-W ("  " + $S.tl + ($S.h * $w) + $S.tr) 'Cyan'; Ui-Sleep
   Ui-W ("  " + $S.v + $t1.PadRight($w) + $S.v) 'Cyan'; Ui-Sleep
   Ui-W ("  " + $S.v + $t2.PadRight($w) + $S.v) 'DarkCyan'; Ui-Sleep

@@ -5,6 +5,7 @@ Asks Codex's app-server for the hooks' keys and hashes and records them in <CODE
 import json, os, re, select, shutil, subprocess, sys, threading, time, queue
 
 check = "--check" in sys.argv
+prune = "--prune" in sys.argv
 home = os.path.abspath([a for a in sys.argv[1:] if not a.startswith("--")][0])
 src = os.path.join(home, "hooks.json")
 if not os.path.isfile(src):
@@ -48,8 +49,19 @@ try:
     r = recv(2)
 finally:
     p.kill()
-hooks = [h for d in ((r or {}).get("result", {}).get("data") or []) for h in d.get("hooks", [])
-         if h.get("sourcePath") == src and "bridge-hook" in (h.get("command") or "")]
+all_hooks = [h for d in ((r or {}).get("result", {}).get("data") or []) for h in d.get("hooks", []) if h.get("sourcePath") == src]
+hooks = [h for h in all_hooks if "bridge-hook" in (h.get("command") or "")]
+if prune:  # after uninstalling the hooks: drop the approval entries of hooks that no longer exist in hooks.json
+    cfg = os.path.join(home, "config.toml")
+    if r is None or not os.path.isfile(cfg):
+        sys.exit(1 if r is None else 0)
+    live = {h["key"] for h in all_hooks}
+    text = open(cfg).read()
+    def drop(m):
+        return "" if m.group(1).startswith(src + ":") and m.group(1) not in live else m.group(0)
+    text = re.sub(r'\n*\[hooks\.state\."([^"]+)"\]\n(?:(?!\[)[^\n]*\n?)*', drop, text).strip("\n")
+    open(cfg, "w").write(text + "\n" if text else "")
+    sys.exit(0)
 if not hooks:
     sys.exit(1)
 

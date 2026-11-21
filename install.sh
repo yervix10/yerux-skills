@@ -3,11 +3,11 @@
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
-# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--no-path] [--no-trust] [--check] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
+# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
-DRY=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""
+DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""
 YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
@@ -19,7 +19,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # ---------- arguments ----------
 while [ $# -gt 0 ]; do case "$1" in
   --skills) [ -n "${2:-}" ] || die "--skills needs a list (a,b | all | none)"; SKILLS_ARG="$2"; shift;;
-  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;;
+  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --safe) OPT_BYPASS=safe;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;; --fix) FIX=1;;
   --name) [ -n "${2:-}" ] || die "--name needs DIR=NAME"; OVERS="$OVERS
 ${2%%=*}=${2#*=}"; shift;;
   --claude-dir) [ -n "${2:-}" ] || die "--claude-dir needs a path"; CLAUDE_LIST="$CLAUDE_LIST
@@ -257,7 +257,7 @@ ${ACC_DIR[$i]}"; fi; i=$((i+1)); done
       NACC=$((nc + nx)); pk="$SEL_SKILLS"; [ "$PKG_AB" = 1 ] && pk="agent-bridge $pk"; pk="$(printf '%s' "$pk" | sed 's/ *$//; s/ /, /g')"; [ -n "$pk" ] || pk="none"
       local npk; npk=$(printf '%s' "$pk" | tr ',' '\n' | sed '/^ *$/d' | wc -l | tr -d ' '); [ ${#pk} -gt 58 ] && pk="${pk:0:55}…  ${DIM}($npk packages)${RST}"
       menu_screen 4 "enter install" "n back"
-      opts="skill+commands, hook"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
+      opts="skill+commands, hook"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_BYPASS" = safe ] && opts="$opts, safe-mode workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
       sl=("${DIM}Accounts     ${RST}${BOLD}$NACC${RST}  ${DIM}($nc claude · $nx codex)${RST}" "${DIM}Packages     ${RST}$pk")
       [ "$PKG_AB" = 1 ] && sl+=("${DIM}agent-bridge ${RST}$opts")
       ui_box "Summary" "${sl[@]}"
@@ -289,22 +289,39 @@ remove_skills() { local d="$1" n; [ -f "$MANIFEST" ] || return 0
   if [ $DRY = 0 ]; then awk -F'	' -v d="$d" '$1 != d' "$MANIFEST" > "$MANIFEST.tmp"; mv "$MANIFEST.tmp" "$MANIFEST"; fi; return 0; }
 
 # ---------- check ----------
-if [ "$MODE" = check ]; then BAD=0
-  ok() { ui_okline "$1"; }; bad() { ui_failline "$1"; BAD=$((BAD+1)); }
-  ui_h "Check"
-  for s in agent admin bridge-hook bridge-runner bridge-send bridge-wait bridge-whoami; do
-    if [ -x "$BR/bin/$s" ]; then ok "script $s"; else bad "script $s missing or broken in $(tilde "$BR/bin")"; fi; done
-  chk_claude() { local d="$1" n; n="$(get_name "$d")"
-    if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/settings.json" >/dev/null 2>&1; then ok "Claude  $n  hook"; else bad "Claude  $n  hook missing ($(tilde "$d"))"; fi
-    if [ "$(jq -r '.env.BRIDGE_NAME // empty' "$d/settings.json" 2>/dev/null)" = "$n" ]; then ok "Claude  $n  name"; else bad "Claude  $n  BRIDGE_NAME not set"; fi
-    if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Claude  $n  skill up to date"; else bad "Claude  $n  skill missing or outdated"; fi; }
-  chk_codex() { local d="$1" n; n="$(get_name "$d")"
-    if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/hooks.json" >/dev/null 2>&1; then ok "Codex   $n  hook"; else bad "Codex   $n  hook missing ($(tilde "$d"))"; fi
-    if command -v python3 >/dev/null 2>&1 && command -v codex >/dev/null 2>&1; then
-      if out="$(python3 "$SRC/scripts/codex-trust-hooks" "$d" --check 2>&1)"; then ok "Codex   $n  hooks approved"; else bad "Codex   $n  $(printf '%s\n' "$out" | grep -c untrusted) hook(s) not approved: reinstall or run /hooks"; fi; fi
-    if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Codex   $n  skill up to date"; else bad "Codex   $n  skill missing or outdated"; fi; }
-  each "$CLAUDE_LIST" chk_claude; each "$CODEX_LIST" chk_codex
-  echo; if [ $BAD = 0 ]; then ui_info "everything looks fine"; else ui_warn "$BAD problem(s): run ./install.sh to repair"; exit 1; fi; exit 0; fi
+BAD=0; QUIET=0
+ok() { [ $QUIET = 1 ] || ui_okline "$1"; }; bad() { [ $QUIET = 1 ] || ui_failline "$1"; BAD=$((BAD+1)); }
+chk_claude() { local d="$1" n; n="$(get_name "$d")"
+  if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/settings.json" >/dev/null 2>&1; then ok "Claude  $n  hook"; else bad "Claude  $n  hook missing ($(tilde "$d"))"; fi
+  if [ "$(jq -r '.env.BRIDGE_NAME // empty' "$d/settings.json" 2>/dev/null)" = "$n" ]; then ok "Claude  $n  name"; else bad "Claude  $n  BRIDGE_NAME not set"; fi
+  if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Claude  $n  skill up to date"; else bad "Claude  $n  skill missing or outdated"; fi; }
+chk_codex() { local d="$1" n out; n="$(get_name "$d")"
+  if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/hooks.json" >/dev/null 2>&1; then ok "Codex   $n  hook"; else bad "Codex   $n  hook missing ($(tilde "$d"))"; fi
+  if [ "$OPT_TRUST" = 1 ] && command -v python3 >/dev/null 2>&1 && command -v codex >/dev/null 2>&1; then
+    if out="$(python3 "$SRC/scripts/codex-trust-hooks" "$d" --check 2>&1)"; then ok "Codex   $n  hooks approved"; else bad "Codex   $n  $(printf '%s\n' "$out" | grep -c untrusted) hook(s) not approved: reinstall or run /hooks"; fi; fi
+  if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Codex   $n  skill up to date"; else bad "Codex   $n  skill missing or outdated"; fi; }
+chk_scripts() { local x; for x in agent admin bridge-hook bridge-runner bridge-send bridge-wait bridge-whoami; do
+    if [ -x "$BR/bin/$x" ]; then ok "script $x"; else bad "script $x missing or broken in $(tilde "$BR/bin")"; fi; done; }
+# account_ok <claude|codex> <dir>: silently tells whether the account is already fully set up
+account_ok() { local b=$BAD; QUIET=1; "chk_$1" "$2"; QUIET=0; local r=$((BAD - b)); BAD=$b; [ $r = 0 ]; }
+upstream_newer() { command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ] || return 1
+  local lo re; lo="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; re="$(timeout 5 git -C "$ROOT" ls-remote origin HEAD 2>/dev/null | cut -f1)"; [ -n "$re" ] && [ "$re" != "$lo" ] || return 1
+  git -C "$ROOT" cat-file -e "$re^{commit}" 2>/dev/null || return 0; ! git -C "$ROOT" merge-base --is-ancestor "$re" "$lo" 2>/dev/null; }
+if [ "$MODE" = check ]; then
+  ui_h "Check"; chk_scripts; SB=$BAD; FIX_CLAUDE=""; FIX_CODEX=""
+  while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_claude "$d"; [ $BAD -gt $b ] && FIX_CLAUDE="$FIX_CLAUDE
+$d"; done <<EOF2
+$CLAUDE_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_codex "$d"; [ $BAD -gt $b ] && FIX_CODEX="$FIX_CODEX
+$d"; done <<EOF2
+$CODEX_LIST
+EOF2
+  echo; upstream_newer && ui_warn "a newer version exists upstream: git pull, or re-run the one-line installer"
+  if [ $BAD = 0 ]; then ui_info "everything looks fine"; exit 0; fi
+  if [ $FIX = 1 ]; then ui_info "repairing $BAD problem(s)..."; MODE=install; YES=1
+    if [ $SB -gt 0 ]; then :; else CLAUDE_LIST="$FIX_CLAUDE"; CODEX_LIST="$FIX_CODEX"; fi
+  else ui_warn "$BAD problem(s): run ./install.sh to repair, or ./install.sh --check --fix"; exit 1; fi; fi
 # ---------- uninstall ----------
 un_claude() { say "uninstalling Claude: $1"; ab_un_claude "$1"; remove_skills "$1"; }
 un_codex() { say "uninstalling Codex: $1"; ab_un_codex "$1"; remove_skills "$1"; }
@@ -317,6 +334,9 @@ in_codex() { [ "$PKG_AB" = 1 ] && ab_install_codex "$1"; install_skills "$1"; re
 step_claude() { ui_run "${BOLD}Claude${RST}  ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_claude "$1"; }
 step_codex() { ui_run "${BOLD}Codex${RST}   ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_codex "$1"; }
 
+# remember which accounts were already fully set up (shown as "up to date" at the end)
+UPTODATE=""; if [ $DRY = 0 ] && [ "$PKG_AB" = 1 ] && command -v jq >/dev/null 2>&1; then
+  for d in $CLAUDE_LIST; do account_ok claude "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $CODEX_LIST; do account_ok codex "$d" && UPTODATE="$UPTODATE|$d"; done; fi
 ui_h "Installing"
 if [ "$PKG_AB" != 1 ]; then :; elif [ $DRY = 1 ]; then :; else ui_run "${BOLD}Scripts${RST}    ${CYN}$(tilde "$BR/bin")${RST}" do_scripts; fi
 if [ "$PKG_AB" = 1 ] && [ $OPT_PATH = 1 ] && [ $DRY = 0 ]; then ui_run "Commands on PATH  ${DIM}~/.local/bin${RST}" do_path; fi
@@ -327,7 +347,8 @@ if [ $DRY = 1 ]; then say; say "dry-run finished: nothing was written."; exit 0;
 lines=("${GRN}${S_OK}${RST} $NACC account(s) configured")
 [ "${UI_FAILS:-0}" -gt 0 ] && lines=("${RED}${S_FAIL}${RST} ${UI_FAILS} step(s) failed - see $UI_LOG")
 [ -n "$SEL_SKILLS" ] && lines+=("${GRN}${S_OK}${RST} skills: $SEL_SKILLS")
-for d in $CLAUDE_LIST $CODEX_LIST; do lines+=("  ${DIM}$(get_name "$d")  $(tilde "$d")${RST}"); done
+for d in $CLAUDE_LIST $CODEX_LIST; do case "$UPTODATE" in *"|$d"*) st="already up to date";; *) st="updated";; esac
+  lines+=("  ${DIM}$(get_name "$d")  $(tilde "$d")  ${RST}${GRN}$st${RST}"); done
 lines+=("" "${BOLD}Next steps${RST}" "  1. Restart open Claude/Codex sessions")
 [ "$PKG_AB" = 1 ] && ab_next_steps
 ui_box "Done" "${lines[@]}"

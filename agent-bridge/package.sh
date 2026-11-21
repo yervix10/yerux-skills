@@ -49,7 +49,8 @@ ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }
   rm -rf "$d/skills/agent-bridge" "$d/commands/admin.md" "$d/commands/agent.md"; return 0; }
 ab_un_codex() { local d="$1"; [ $DRY = 1 ] && return 0
-  del_hooks "$d/hooks.json"; rm -rf "$d/skills/agent-bridge" "$d/prompts/admin.md" "$d/prompts/agent.md"; strip_block "$d/AGENTS.md"; return 0; }
+  del_hooks "$d/hooks.json"; command -v python3 >/dev/null 2>&1 && python3 "$SRC/scripts/codex-trust-hooks" "$d" --prune >/dev/null 2>&1
+  rm -rf "$d/skills/agent-bridge" "$d/prompts/admin.md" "$d/prompts/agent.md"; strip_block "$d/AGENTS.md"; return 0; }
 ab_next_steps() { # appends to the global "lines" array
   lines+=("  2. Codex: hooks are pre-approved (if ${CYN}/hooks${RST} still lists one, approve it)" "  3. Try ${CYN}/admin${RST}  then  ${CYN}/agent ping <name>${RST}")
   [ $OPT_PATH = 1 ] && case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) lines+=("" "${YEL}!${RST} add ~/.local/bin to your PATH to use 'agent' and 'admin'");; esac
