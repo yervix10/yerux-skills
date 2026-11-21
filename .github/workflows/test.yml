@@ -6,15 +6,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax of every shell script
-        run: for f in install.sh get.sh lib/ui.sh agent-bridge/package.sh agent-bridge/scripts/*; do case "$(head -c 20 "$f")" in "#!/usr/bin/env python3"*) python3 -m py_compile "$f";; *) bash -n "$f";; esac; done
+        run: |
+          for f in install.sh get.sh lib/ui.sh agent-bridge/package.sh agent-bridge/scripts/*; do
+            [ "$f" = agent-bridge/scripts/bridge-feed ] && continue
+            case "$f" in *.js) node --check "$f";; *) case "$(head -n 1 "$f")" in *python3*) python3 -m py_compile "$f";; *) bash -n "$f";; esac;; esac
+          done
+          node --check agent-bridge/scripts/bridge-feed
       - name: Runner, worktree and installer tests
         run: tests/run.sh
   macos:
     runs-on: macos-latest
-    continue-on-error: true   # bash 3.2 compatibility is best effort
     steps:
       - uses: actions/checkout@v4
-      - run: brew install jq coreutils || true
+      - run: brew install jq coreutils bash
+      - run: echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
       - run: tests/run.sh
   windows-syntax:
     runs-on: windows-latest

@@ -376,7 +376,7 @@ function Invoke-Runner($name) {
         $nAlert++; Log "still working after $([int]($el / 60)) min: $($st.order)"
         $adm = (Read-Text (Join-Path $B 'admin')).Trim()
         Notify-Desktop "ALERT: still on the same order after $([int]($el / 60)) min"
-        if ($adm) { $script:me = $name; Send-Msg $adm "ALERT: worker '$name' has been on the same order for $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" }) and has not replied yet (still running, not killed). Order: $($st.order). Check: agent status | agent logs $name | agent reset $name" | Out-Null } } }
+        if ($adm) { $script:me = $name; Send-Msg $adm "ALERT: worker '$name' has been on the same order for $(if ($el -ge 120) { "$([int]($el / 60)) min" } else { "${el}s" }) and has not replied yet (still running, not killed). Order: $($st.order). Check: agent status | agent logs $name | agent reset $name" | Out-Null } }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
     if ($kind -eq 'codex') {
       if ($rc -eq 0 -and $res -match '"thread_id"\s*:\s*"([^"]+)"') { Write-Text $sf $Matches[1] }

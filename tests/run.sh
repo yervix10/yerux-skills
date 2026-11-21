@@ -80,7 +80,8 @@ check "STALLED message sent" "$(for f in "$T/b/inbox/adm"/*.msg; do tail -n +6 "
 
 echo "worktree"; ( cd "$T/proj" && git init -q . && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m i ); rm -f "$T/b/inbox/adm"/*
 export BRIDGE_WORKTREE=1; echo ok > "$T/mode"; start; send "in repo" "$T/proj"; wait_reply 1
-check "worker ran inside its worktree" "$(cat "$T/mode.cwd")" "$T/proj/.worktrees/w1"
+worktree_physical="$(cd "$T/proj/.worktrees/w1" && pwd -P)"; got_physical="$(cd "$(cat "$T/mode.cwd")" && pwd -P)"
+check "worker ran inside its worktree" "$got_physical" "$worktree_physical"
 check "branch mejora/w1 exists" "$(git -C "$T/proj" branch --list 'mejora/w1' | tr -d ' *+')" "mejora/w1"
 check ".worktrees is ignored" "$(git -C "$T/proj" status --short | wc -l | tr -d ' ')" "0"; stop
 
@@ -123,7 +124,7 @@ check "check detects a missing skill" "$(chk | grep -c 'skill missing')" "1"
 inst --check --fix --claude-dir "$H/.claude-a" --codex-dir "$H/.codex-b" >/dev/null 2>&1
 check "--fix restores it" "$([ -f "$H/.claude-a/skills/agent-bridge/SKILL.md" ] && echo yes)" "yes"
 inst --uninstall --claude-dir "$H/.claude-a" --codex-dir "$H/.codex-b" >/dev/null 2>&1
-check "uninstall removes the Codex approvals" "$(grep -c trusted_hash "$H/.codex-b/config.toml" 2>/dev/null | tr -d '\n')" "0"
+check "uninstall removes the Codex approvals" "$(if [ -f "$H/.codex-b/config.toml" ]; then grep -c trusted_hash "$H/.codex-b/config.toml" 2>/dev/null || echo 0; else echo 0; fi | tail -1)" "0"
 
 echo "dashboard data (bridge-usage) and statusline wrapper"; export PATH="$OLDPATH"
 mkdir -p "$T/home/.codex-fake/sessions/2026/01/01"; NOW=$(date +%s)
@@ -160,6 +161,11 @@ check "Claude context is cached when known" "$("$S/bridge-usage" w1 | cut -f4)" 
 check "Claude context is retained when the live log empties" "$("$S/bridge-usage" w1 | cut -f4)" "50"
 old_ctx_at=$(( $(date +%s) - 1200 )); jq --argjson at "$old_ctx_at" '.updated_at=$at' "$T/b/usage/w1.last" > "$T/ctx-cache-old.tmp" && mv "$T/ctx-cache-old.tmp" "$T/b/usage/w1.last"
 check "Claude cache exposes its original sample age" "$([ "$("$S/bridge-usage" w1 | cut -f7)" -ge 1199 ] && echo yes)" "yes"
+cp "$ROOT/agent-bridge/widget/test/fixtures/claude-live-no-result.jsonl" "$T/b/logs/w1.live"
+check "Claude computes context from live assistant usage before result" "$("$S/bridge-usage" w1 | cut -f4)" "32"
+check "Claude caches context window by model" "$(jq -r 'select(.window==1000000 and .model=="claude-sonnet-5-5")|"ok"' "$T/b/usage/w1.window")" "ok"
+printf '%s\n' '{"type":"system","subtype":"init","model":"claude-sonnet-5-5","cwd":"/tmp/project"}' > "$T/b/logs/w1.live"
+check "Claude retains last percent when current live log has no assistant or result" "$("$S/bridge-usage" w1 | cut -f4)" "32"
 
 echo "model switch and dashboard command"
 export PATH="$T/bin:$OLDPATH"; echo adm > "$T/b/admin"
@@ -172,7 +178,7 @@ echo "$*" > "$FAKEMODE.args"; printf '%s\n' '{"type":"result","is_error":false,"
 EOF
 rm -f "$T/b/inbox/adm"/*; start; send "use the model"; wait_reply 1; stop
 check "worker runs with --model" "$(grep -o -- '--model [^ ]*' "$T/mode.args")" "--model claude-opus-test"
-check "effort validated per provider (claude has no 'minimal')" "$(BRIDGE_NAME=adm "$S/agent" effort w1 minimal 2>&1 | head -1 | cut -c1-25)" "invalid effort for claude"
+check "effort validated per provider (claude has no 'minimal')" "$(BRIDGE_NAME=adm "$S/agent" effort w1 minimal 2>&1 | head -1)" "invalid effort for claude: use one of low medium high xhigh max, or default"
 check "model + effort in one command" "$(BRIDGE_NAME=adm "$S/agent" model w1 claude-opus-test high | tail -1)" "w1: effort set to high (applies from its next order)"
 rm -f "$T/b/inbox/adm"/*; start; send "use the effort"; wait_reply 1; stop
 check "claude worker runs with --effort" "$(grep -o -- '--effort [^ ]*' "$T/mode.args")" "--effort high"
@@ -203,7 +209,8 @@ printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/kiro
 check "Kiro runner returns every multipart text fragment" "$(last_msg)" "Primera parte.
 Segunda parte."
 check "Kiro prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.args")" "1"
-check "Kiro saves list-sessions id for next order" "$(cat "$T/b/sessions/kiro-1/$(find "$T/b/sessions/kiro-1" -maxdepth 1 -type f ! -name '*.cwd' -printf '%f\n' | head -1)" 2>/dev/null)" "sess-kiro-test"
+kiro_session_file="$(find "$T/b/sessions/kiro-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "Kiro saves list-sessions id for next order" "$(cat "$kiro_session_file" 2>/dev/null)" "sess-kiro-test"
 printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: %s\n\nsecond order\n' "$T/kiro-proj" > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2)); stop
 check "Kiro resumes by its saved session id" "$(cat "$T/home/.kiro-fake/resumed.log" 2>/dev/null | wc -l | tr -d ' ')" "1"
 check "Kiro receives configured model and effort" "$(grep -c -- '--model claude-sonnet-4.5 --effort high' "$FAKEMODE.args" 2>/dev/null || true)" "1"

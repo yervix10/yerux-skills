@@ -129,7 +129,7 @@ case "$1" in
       setone() { local file="$1" val="$2" what="$3"
         if [ "$val" = default ]; then rm -f "$file"; echo "$n: $what back to its default (applies from its next order)"; return 0; fi
         if [ "$what" = effort ]; then case "$kind" in claude|kiro) levels="low medium high xhigh max";; *) levels="none minimal low medium high xhigh";; esac
-          case " $levels " in *" $val "*) ;; *) echo "invalid effort for $(basename "$dir" | sed 's/^\.\(claude\|codex\).*/\1/'): use one of $levels, or default" >&2; return 1;; esac
+          case " $levels " in *" $val "*) ;; *) echo "invalid effort for $kind: use one of $levels, or default" >&2; return 1;; esac
         else [[ "$val" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "invalid model name" >&2; return 1; }
           if [ "$kind" = kiro ] && { ! command -v kiro-cli >/dev/null 2>&1 || ! kiro-cli chat --list-models --format json 2>/dev/null | jq -e --arg m "$val" '.models[]|select(.model_id==$m)' >/dev/null; }; then echo "modelo Kiro desconocido o kiro-cli no disponible" >&2; return 1; fi; fi
         mkdir -p "$(dirname "$file")"; printf '%s' "$val" > "$file"; echo "$n: $what set to $val (applies from its next order)"; }
