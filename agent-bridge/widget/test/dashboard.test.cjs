@@ -28,12 +28,19 @@ test('rechaza JSON, esquema, duplicados y métricas inválidas', () => {
   for (const change of [
     { name: ' ' }, { role: 'root' }, { kind: 'other' }, { state: 'busy' }, { tier: 'max' },
     { context: -1 }, { data_age_s: '601' }, { model: null }, { branch: undefined },
-    { five_hour: null }, { weekly: { used: 101, resets_at: null } },
+    { five_hour: null }, { weekly: { used: -1, resets_at: null } },
     { monthly: { used: 1, resets_at: -1 } },
   ]) {
     assert.throws(() => parseDashboard(JSON.stringify({ time: 0, agents: [{ ...agent, ...change }] })));
   }
   assert.throws(() => parseDashboard(JSON.stringify({ time: 0, agents: [agent, agent] })));
+});
+
+test('limita al 100 % el uso que supera el límite', () => {
+  const over = { ...agent, five_hour: { used: 101, resets_at: null }, context: 130 };
+  const [parsed] = parseDashboard(JSON.stringify({ time: 0, agents: [over] })).agents;
+  assert.equal(parsed.five_hour.used, 100);
+  assert.equal(parsed.context, 100);
 });
 
 test('formatea el reinicio desde días hasta segundos y trunca al vencer', () => {

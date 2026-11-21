@@ -18,7 +18,8 @@ function nonnegative(value) {
 }
 
 function percentage(value) {
-  return value === null || (Number.isFinite(value) && value >= 0 && value <= 100);
+  // usage can legitimately exceed 100% once a limit is hit; it is clamped on output
+  return value === null || (Number.isFinite(value) && value >= 0);
 }
 
 function parseDashboard(source) {
@@ -47,8 +48,9 @@ function parseDashboard(source) {
     );
     for (const key of periods) {
       const { used, resets_at } = agent[key];
-      normalized[key] = { used, resets_at };
+      normalized[key] = { used: used === null ? null : Math.min(used, 100), resets_at };
     }
+    if (normalized.context !== null) normalized.context = Math.min(normalized.context, 100);
     return normalized;
   });
   return { time: data.time, agents };
