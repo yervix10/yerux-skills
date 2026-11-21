@@ -65,9 +65,9 @@ function Ab-Uninstall-Claude($d) {
   $s = Join-Path $d 'settings.json'
   if (Test-Path $s) { $j = Load-Json $s; if ($j.PSObject.Properties['env']) { $j.env.PSObject.Properties.Remove('BRIDGE_NAME'); $j.env.PSObject.Properties.Remove('BRIDGE_COMMANDERS') }; Save-Json $s $j }
   Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item (Join-Path $d 'commands\admin.md'), (Join-Path $d 'commands\agent.md') -Force -ErrorAction SilentlyContinue }
+  Remove-Item (Join-Path $d 'commands\admin.md'), (Join-Path $d 'commands\agent.md'), (Join-Path $d 'commands\dashboard.md') -Force -ErrorAction SilentlyContinue }
 function Ab-Uninstall-Codex($d) {
   Del-Hooks (Join-Path $d 'hooks.json'); Strip-Block (Join-Path $d 'AGENTS.md')
   Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item (Join-Path $d 'prompts\admin.md'), (Join-Path $d 'prompts\agent.md') -Force -ErrorAction SilentlyContinue }
+  Remove-Item (Join-Path $d 'prompts\admin.md'), (Join-Path $d 'prompts\agent.md'), (Join-Path $d 'prompts\dashboard.md') -Force -ErrorAction SilentlyContinue }
 function Ab-Next-Steps { return @('  2. Open a NEW terminal (PATH changed)', '  3. Codex: hooks are pre-approved (if /hooks still lists one, approve it)', '  4. Try /admin  then  /agent ping <name>', '', '! WSL accounts: run ./install.sh from inside WSL') }

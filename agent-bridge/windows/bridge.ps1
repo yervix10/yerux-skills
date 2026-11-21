@@ -181,7 +181,8 @@ function Invoke-Agent($a) {
           & git -C $root worktree remove $d; if ($LASTEXITCODE -eq 0) { & git -C $root branch -d "mejora/$wn" } }
         default { Write-Error 'agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]' } } }
     'dashboard' {
-      while ($true) { Clear-Host; Write-Host 'agent-bridge ' -NoNewline -ForegroundColor White; Write-Host "$((Get-Date).ToString('HH:mm:ss'))   (Ctrl+C to exit)" -ForegroundColor DarkGray; Write-Host ''
+      $once = ($a[1] -eq '--once')
+      while ($true) { if ($once) { Write-Output "agent-bridge  $((Get-Date).ToString('HH:mm:ss'))"; Write-Output '' } else { Clear-Host; Write-Host 'agent-bridge ' -NoNewline -ForegroundColor White; Write-Host "$((Get-Date).ToString('HH:mm:ss'))   (Ctrl+C to exit)" -ForegroundColor DarkGray; Write-Host '' }
         $lines = @(Invoke-Agent @('status'))
         foreach ($n in (Get-Names)) {
           $u = Get-Usage $n; $d = { param($x) if ($x -ne '') { $x } else { '-' } }; $sep = ' | '
@@ -191,10 +192,19 @@ function Invoke-Agent($a) {
           if ($u.age -ne '' -and [int64]$u.age -gt 600) { Write-Host " (data $([int]([int64]$u.age / 60)) min old)" -NoNewline -ForegroundColor DarkGray }
           Write-Host ''; $st = $lines | Where-Object { $_ -like "${n}:*" } | Select-Object -First 1
           Write-Host ("          " + ([string]$st -replace "^${n}:\s*", '')) -ForegroundColor DarkGray }
-        Start-Sleep -Seconds 2 } }
+        if ($once) { break }; Start-Sleep -Seconds 2 } }
+    'model' {
+      $n = $a[1]; $m = $a[2]; $mf = Join-Path $B "models\$n"
+      if (-not $n) { foreach ($w in (Get-Names)) { $v = Join-Path $B "models\$w"; Write-Output "${w}: $(if (Test-Path $v) { (Read-Text $v).Trim() } else { 'default' })" }; return }
+      if ($me -ne (Read-Text (Join-Path $B 'admin')).Trim()) { Write-Error "only the admin can change a worker's model (you are $me)"; return }
+      if (-not (@(Get-Names) -contains $n)) { Write-Error "unknown worker: $n"; return }
+      if (-not $m) { Write-Error 'usage: agent model <worker> <model|default>'; return }
+      if ($m -eq 'default') { Remove-Item $mf -Force -ErrorAction SilentlyContinue; Write-Output "${n}: model back to its default (applies from its next order)"; return }
+      if ($m -notmatch '^[A-Za-z0-9._:/\[\]-]+$') { Write-Error 'invalid model name'; return }
+      Ensure-Dir (Join-Path $B 'models'); Write-Text $mf $m; Write-Output "${n}: model set to $m (applies from its next order)" }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
-      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
+      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model [worker model|default] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
     default  { Send-Msg $a[0] (Join-Rest $a 1) } } }
 
 # ---- runner: headless worker with memory (resumes its conversation per working directory) ----
@@ -313,18 +323,19 @@ function Invoke-Runner($name) {
     $prompt = "You are worker '$name' in a team of coordinated sessions. The admin '$from' gives you this order. Carry it out with your tools and reply ONLY with the final result, briefly: your reply is sent to '$from' automatically.`n`nOrder:`n$body"
     Log "order from $from in ${cwd}: $($body.Substring(0, [Math]::Min(120, $body.Length)) -replace '\s+', ' ')"
     $st.status = 'working'; $st.since = (Get-Epoch); $st.order = ($body.Substring(0, [Math]::Min(100, $body.Length)) -replace '\s+', ' '); Write-State
+    $mfile = Join-Path $B "models\$name"; $mdl = if (Test-Path $mfile) { (Read-Text $mfile).Trim() } else { '' }   # set by the admin with `agent model`
     $envs = @{ BRIDGE_NO_HOOK = '1'; BRIDGE_NAME = $name }
     $newId = $null; $outFile = $null
     if ($kind -eq 'claude') {
       $envs['CLAUDE_CONFIG_DIR'] = $dir
       $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
-      $cargs = @('-p', '--output-format', 'stream-json', '--verbose'); if ($safe) { $cargs += @('--permission-mode', 'acceptEdits') } elseif ($bypass) { $cargs += '--dangerously-skip-permissions' }
+      $cargs = @('-p', '--output-format', 'stream-json', '--verbose'); if ($mdl) { $cargs += @('--model', $mdl) }; if ($safe) { $cargs += @('--permission-mode', 'acceptEdits') } elseif ($bypass) { $cargs += '--dangerously-skip-permissions' }
       if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) } else { $newId = [guid]::NewGuid().ToString(); $cargs += @('--session-id', $newId) }
     } else {
       $envs['CODEX_HOME'] = $dir; $outFile = [IO.Path]::GetTempFileName()
       $perm = if ($bypass) { @('--dangerously-bypass-approvals-and-sandbox') } else { @('-s', 'workspace-write') }
-      if (Test-Path $sf) { $cargs = @('exec', 'resume') + $(if ($bypass) { $perm } else { @('-c', 'sandbox_mode="workspace-write"') }) + @('--skip-git-repo-check', '-o', $outFile, (Read-Text $sf).Trim(), '-') }
-      else { $cargs = @('exec', '--json', '--skip-git-repo-check') + $perm + @('-o', $outFile, '-') } }
+      if (Test-Path $sf) { $cargs = @('exec', 'resume') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $(if ($bypass) { $perm } else { @('-c', 'sandbox_mode="workspace-write"') }) + @('--skip-git-repo-check', '-o', $outFile, (Read-Text $sf).Trim(), '-') }
+      else { $cargs = @('exec', '--json', '--skip-git-repo-check') + $(if ($mdl) { @('-m', $mdl) } else { @() }) + $perm + @('-o', $outFile, '-') } }
     $job = Start-Job -ScriptBlock {
       param($cwd, $envs, $exe, $cargs, $prompt, $live)
       Set-Location $cwd; foreach ($k in $envs.Keys) { Set-Item "env:$k" $envs[$k] }

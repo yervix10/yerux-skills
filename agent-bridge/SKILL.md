@@ -43,7 +43,7 @@ Runners have no terminal, so they report on their own:
 - There is no time limit per order. Instead a worker still on the same order after `BRIDGE_ALERT` seconds (default 1800; `ALERT=` in `~/.claude-bridge/config`; 0 disables) sends the admin an `ALERT:` message every period. It is never killed automatically: ask the user, then `agent down <name>; agent up <name>` (and `agent reset <name>` to drop its memory).
 - After `LIMIT:` the worker pauses itself until the reset (`agent status` shows `LIMITED`) and keeps queued orders. `STALLED:` means no tool activity for `BRIDGE_STALL` seconds.
 - `agent wt list | diff <name> | merge <name> --yes | clean <name> --yes` reviews, merges and removes a worker's worktree; ask the user before `--yes`.
-- `agent dashboard` is a live view of all agents (model, project, branch, context %, 5h and weekly usage, state). With `BRIDGE_REASSIGN=1` a worker that hits a limit hands its order to an idle one (the reply says so).
+- The admin runs `/dashboard` (= `agent dashboard --once`) to see every agent at a glance, and `agent model <worker> <model|default>` to change the model a worker uses from its next order on (`agent model` lists them; only the admin may change it). `agent dashboard` alone is the live terminal view of all agents (model, project, branch, context %, 5h and weekly usage, state). With `BRIDGE_REASSIGN=1` a worker that hits a limit hands its order to an idle one (the reply says so).
 - `agent logs <name>` prints the state and the tail of the log.
 
 ## Security

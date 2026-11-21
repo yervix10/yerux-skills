@@ -27,7 +27,7 @@ ui_rep() { local s="" i=0; while [ $i -lt "$2" ]; do s="$s$1"; i=$((i+1)); done;
 ui_bline() { # border-color, visible-length, styled-text
   printf '  %s%s%s%s%*s%s%s%s\n' "$1" "$B_V" "$RST" "$3" $((UI_W - $2)) "" "$1" "$B_V" "$RST"; }
 ui_banner() {
-  local ver="${AGENT_BRIDGE_VERSION:-1.3.0}" t1="yerux - skills" t2="installer" t3="* featured: agent-bridge"
+  local ver="${AGENT_BRIDGE_VERSION:-1.4.0}" t1="yerux - skills" t2="installer" t3="* featured: agent-bridge"
   UI_W=50
   echo
   printf '  %s%s%s%s\n' "$(c 45)" "$B_TL" "$(ui_rep "$B_H" $UI_W)" "$B_TR$RST"; ui_sleep 0.05

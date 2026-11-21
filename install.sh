@@ -3,12 +3,12 @@
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
-# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
+# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--no-statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
 DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""
-YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=0; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
+YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
 tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#$HOME}";; *) printf '%s' "$1";; esac; }
@@ -19,7 +19,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # ---------- arguments ----------
 while [ $# -gt 0 ]; do case "$1" in
   --skills) [ -n "${2:-}" ] || die "--skills needs a list (a,b | all | none)"; SKILLS_ARG="$2"; shift;;
-  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --safe) OPT_BYPASS=safe;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --statusline) OPT_STATUSLINE=1;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;; --fix) FIX=1;;
+  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --safe) OPT_BYPASS=safe;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --statusline) OPT_STATUSLINE=1;; --no-statusline) OPT_STATUSLINE=0;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;; --fix) FIX=1;;
   --name) [ -n "${2:-}" ] || die "--name needs DIR=NAME"; OVERS="$OVERS
 ${2%%=*}=${2#*=}"; shift;;
   --claude-dir) [ -n "${2:-}" ] || die "--claude-dir needs a path"; CLAUDE_LIST="$CLAUDE_LIST
@@ -247,7 +247,7 @@ ${ACC_DIR[$i]}"; fi; i=$((i+1)); done
       if [ "$PKG_AB" = 1 ]; then step=3; else step=4; fi;;
     3) # --- agent-bridge options (info) ---
       menu_screen 3 "b back" "enter continue"; echo "  ${DIM}What agent-bridge will set up${RST}"; echo
-      for d in "Skill + /admin /agent commands|how sessions learn the commands" "Message hook|delivers messages between sessions" "Auto-approve Codex hooks|no /hooks review needed in Codex" "Headless workers in bypass mode|no permission prompts for orders" "Put agent/admin on PATH|~/.local/bin"; do
+      for d in "Skill + /admin /agent commands|how sessions learn the commands" "Message hook|delivers messages between sessions" "Auto-approve Codex hooks|no /hooks review needed in Codex" "Status line data for /dashboard|keeps your status line, also saves its numbers" "Headless workers in bypass mode|no permission prompts for orders" "Put agent/admin on PATH|~/.local/bin"; do
         printf '    %s%s%s  %-34s %s%s%s\n' "$GRN" "$S_OK" "$RST" "${d%%|*}" "$DIM" "${d#*|}" "$RST"; done
       echo; MS_BACK=0; info_wait
       [ $MS_BACK = 1 ] && { step=2; continue; }
@@ -257,7 +257,7 @@ ${ACC_DIR[$i]}"; fi; i=$((i+1)); done
       NACC=$((nc + nx)); pk="$SEL_SKILLS"; [ "$PKG_AB" = 1 ] && pk="agent-bridge $pk"; pk="$(printf '%s' "$pk" | sed 's/ *$//; s/ /, /g')"; [ -n "$pk" ] || pk="none"
       local npk; npk=$(printf '%s' "$pk" | tr ',' '\n' | sed '/^ *$/d' | wc -l | tr -d ' '); [ ${#pk} -gt 58 ] && pk="${pk:0:55}…  ${DIM}($npk packages)${RST}"
       menu_screen 4 "enter install" "n back"
-      opts="skill+commands, hook"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_BYPASS" = safe ] && opts="$opts, safe-mode workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
+      opts="skill+commands, hook"; [ "$OPT_STATUSLINE" = 1 ] && opts="$opts, status line data"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_BYPASS" = safe ] && opts="$opts, safe-mode workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
       sl=("${DIM}Accounts     ${RST}${BOLD}$NACC${RST}  ${DIM}($nc claude · $nx codex)${RST}" "${DIM}Packages     ${RST}$pk")
       [ "$PKG_AB" = 1 ] && sl+=("${DIM}agent-bridge ${RST}$opts")
       ui_box "Summary" "${sl[@]}"
@@ -294,6 +294,7 @@ ok() { [ $QUIET = 1 ] || ui_okline "$1"; }; bad() { [ $QUIET = 1 ] || ui_faillin
 chk_claude() { local d="$1" n; n="$(get_name "$d")"
   if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/settings.json" >/dev/null 2>&1; then ok "Claude  $n  hook"; else bad "Claude  $n  hook missing ($(tilde "$d"))"; fi
   if [ "$(jq -r '.env.BRIDGE_NAME // empty' "$d/settings.json" 2>/dev/null)" = "$n" ]; then ok "Claude  $n  name"; else bad "Claude  $n  BRIDGE_NAME not set"; fi
+  if [ "$OPT_STATUSLINE" = 1 ]; then if [ "$(jq -r '.statusLine.command // empty' "$d/settings.json" 2>/dev/null)" = "$BR/bin/bridge-statusline" ]; then ok "Claude  $n  status line data"; else bad "Claude  $n  status line not wrapped (dashboard data)"; fi; fi
   if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Claude  $n  skill up to date"; else bad "Claude  $n  skill missing or outdated"; fi; }
 chk_codex() { local d="$1" n out; n="$(get_name "$d")"
   if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/hooks.json" >/dev/null 2>&1; then ok "Codex   $n  hook"; else bad "Codex   $n  hook missing ($(tilde "$d"))"; fi

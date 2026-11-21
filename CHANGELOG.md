@@ -6,6 +6,13 @@
   (`bridge-usage`). Claude agents: worker live log, or the saved status line JSON with `./install.sh --statusline`
   (a wrapper that keeps the original bar; `--uninstall` restores it). Windows: Codex and Claude worker data, no status line wrapper.
 
+## 1.4.0
+- Status line data is on by default at install (`--no-statusline` skips it); `--check` verifies it. Not available on Windows.
+- Admin command `/dashboard` (`agent dashboard --once`, plain snapshot; the live view stays `agent dashboard` in a terminal).
+- `agent model <worker> <model|default>`: the admin changes the model a worker uses from its next order (`--model` for Claude,
+  `-m` for Codex). Only the admin may do it; `agent model` lists them and the dashboard shows the one set.
+- Ported to Windows (except the status line wrapper).
+
 ## 1.3.1
 - Dashboard: Claude agents now load. Interactive sessions are read from the status line cache when present, workers from their live
   log (now with context % from the usage and the model's window), and `agent refresh` fills the rest with one tiny request per account.

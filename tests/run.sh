@@ -114,7 +114,7 @@ check "codex ctx 26%" "$(echo "$U" | cut -f4)" "26"
 check "codex 5h 47%"  "$(echo "$U" | cut -f5)" "47"
 check "codex week 90%" "$(echo "$U" | cut -f6)" "90"
 H2="$T/ihome2"; mkdir -p "$H2/.claude-a"; echo '{"statusLine":{"type":"command","command":"echo ORIG-BAR"}}' > "$H2/.claude-a/settings.json"
-( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --yes --no-path --no-trust --statusline --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
+( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --yes --no-path --no-trust --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
 OUT="$(printf '{"model":{"display_name":"Sonnet"},"workspace":{"current_dir":"%s"},"context_window":{"used_percentage":30},"rate_limits":{"five_hour":{"used_percentage":50},"seven_day":{"used_percentage":70}}}' "$T/proj" | BRIDGE_DIR="$H2/.claude-bridge" BRIDGE_NAME="$(awk -F= '{print $2}' "$H2/.claude-bridge/names.conf" | head -1)" "$H2/.claude-bridge/bin/bridge-statusline")"
 check "wrapper keeps the original bar" "$OUT" "ORIG-BAR"
 UN="$(awk -F= '{print $2}' "$H2/.claude-bridge/names.conf" | head -1)"
@@ -126,5 +126,21 @@ rm -f "$H2/.claude-bridge/usage"/*.json
 check "claude usage from a status line cache" "$(BRIDGE_STATUS_CACHE="$T/sc" BRIDGE_DIR="$H2/.claude-bridge" "$H2/.claude-bridge/bin/bridge-usage" "$UN" | cut -f1,4,5,6 | tr '\t' ' ')" "Opus 12 33 44"
 ( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --uninstall --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
 check "uninstall restores the original status line" "$(jq -r '.statusLine.command' "$H2/.claude-a/settings.json")" "echo ORIG-BAR"
+
+echo "model switch and dashboard command"
+export PATH="$T/bin:$OLDPATH"; echo adm > "$T/b/admin"
+check "non-admin cannot change a model" "$(BRIDGE_NAME=w1 "$S/agent" model w2 gpt-x 2>&1 | head -1 | cut -c1-30)" "only the admin can change a wo"
+check "admin sets a model" "$(BRIDGE_NAME=adm "$S/agent" model w1 claude-opus-test | head -1)" "w1: model set to claude-opus-test (applies from its next order)"
+check "bad model names are refused" "$(BRIDGE_NAME=adm "$S/agent" model w1 'a b;rm' 2>&1 | head -1)" "invalid model name"
+cat > "$T/bin/claude" <<'EOF'
+#!/bin/bash
+echo "$*" > "$FAKEMODE.args"; printf '%s\n' '{"type":"result","is_error":false,"result":"fine"}'
+EOF
+rm -f "$T/b/inbox/adm"/*; start; send "use the model"; wait_reply 1; stop
+check "worker runs with --model" "$(grep -o -- '--model [^ ]*' "$T/mode.args")" "--model claude-opus-test"
+BRIDGE_NAME=adm "$S/agent" model w1 default >/dev/null
+check "default removes it" "$([ -f "$T/b/models/w1" ] && echo present || echo gone)" "gone"
+check "dashboard --once prints plain text" "$("$S/agent" dashboard --once | grep -c $'\033')" "0"
+check "dashboard --once lists every agent" "$("$S/agent" dashboard --once | grep -c '^w[12] ')" "2"
 
 echo; echo "passed: $pass  failed: $fail"; [ $fail = 0 ]

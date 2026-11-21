@@ -107,13 +107,15 @@ while true; do
 Order:
 $body"
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
+  MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
+  if [ -n "$mdl" ]; then if [ "$kind" = claude ]; then MODEL_ARGS=(--model "$mdl"); else MODEL_ARGS=(-m "$mdl"); fi; fi
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
   tmp="$(mktemp)"; rc=0
   if [ "$kind" = claude ]; then
     if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
     else id="$(newuuid)"; args=(--session-id "$id"); new=1; fi
     : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
-    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p --output-format stream-json --verbose "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     # the reply is the final "result" event; a rejected rate-limit event tells when the limit resets
     iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
     RESET_AT="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|select(.status=="rejected")|.resetsAt' "$LIVE" 2>/dev/null | tail -1)"
@@ -123,9 +125,9 @@ $body"
   else
     out="$(mktemp)"; : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     if [ -f "$sf" ]; then
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume --json "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume --json "${MODEL_ARGS[@]}" "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     else
-      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${MODEL_ARGS[@]}" "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
       id="$(jq -r 'select(.type=="thread.started")|.thread_id' "$LIVE" 2>/dev/null | head -1)"
       [ "$rc" = 0 ] && [ -n "$id" ] && echo "$id" > "$sf"
     fi
