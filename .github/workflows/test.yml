@@ -1,0 +1,30 @@
+name: test
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax of every shell script
+        run: for f in install.sh get.sh lib/ui.sh agent-bridge/package.sh agent-bridge/scripts/*; do case "$(head -c 20 "$f")" in "#!/usr/bin/env python3"*) python3 -m py_compile "$f";; *) bash -n "$f";; esac; done
+      - name: Runner, worktree and installer tests
+        run: tests/run.sh
+  macos:
+    runs-on: macos-latest
+    continue-on-error: true   # bash 3.2 compatibility is best effort
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install jq coreutils || true
+      - run: tests/run.sh
+  windows-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every PowerShell script
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $errs = $null; [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            foreach ($e in $errs) { Write-Host "$($_.FullName):$($e.Extent.StartLineNumber) $($e.Message)"; $bad++ } }
+          if ($bad) { exit 1 }

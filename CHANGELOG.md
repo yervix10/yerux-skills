@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+- CI (GitHub Actions): shell syntax + `tests/run.sh` on Linux, macOS (best effort), PowerShell parse on Windows.
+- Tests now cover Codex workers, reassignment, `agent wt`, and install / `--check` / `--fix` / uninstall in an isolated HOME.
+- Codex workers: live JSON log, last action in `agent status`, `STALLED:` and error classification from its events.
+- `BRIDGE_REASSIGN=1`: on a usage limit the order goes to an idle worker. `agent dashboard`. Desktop notifications (`BRIDGE_NOTIFY=0` mutes).
+- Installer: `--check --fix` repairs only failing accounts, notices a newer upstream version, final box says which accounts were
+  "already up to date" vs "updated". `--uninstall` removes the Codex hook approvals it added.
+- `--safe` / `BRIDGE_BYPASS=safe` mode for workers (Linux/macOS only).
+
 ## 1.1.0
 
 ### Installer
