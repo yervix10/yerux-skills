@@ -50,7 +50,7 @@ Para un adaptador de Node en Windows puedes usar una ruta como `C:\Bridge\agent-
 
 ## Interfaz y rendimiento
 
-La vista compacta muestra una fila por agente con nombre, estado, porcentaje más alto y tier. La vista detallada muestra el detalle completo con tooltip; destaca contexto superior al 40 % y tier `skip`, y resalta el límite con menos margen. El orden por urgencia coloca admin arriba y después los estados limitados, atascados y trabajando; el orden manual conserva el orden de configuración de agentes. Las capturas de antes y después están en [before.png](docs/before.png) y [screenshot.png](docs/screenshot.png).
+La interfaz usa un tema oscuro acrílico y cambia a claro según `prefers-color-scheme`. La cabecera resume agentes trabajando, libres y con alertas. Cada tarjeta presenta el estado con chip semántico, modelo y esfuerzo, proyecto/rama, contexto con marca de referencia al 40 % y barras de uso de 5 h, semana y mes con umbrales de color y cuenta atrás. La vista compacta conserva una fila por agente; la detallada muestra métricas y detalles con tooltip. El scroll permanece dentro de la lista y el límite más alto se resalta cuando llega a 60 %. Las capturas de antes y después están en [before.png](docs/before.png) y [screenshot.png](docs/screenshot.png).
 
 Para reducir consumo, Chromium limita el heap V8 a 128 MiB, la caché de disco a 1 MiB, desactiva corrector y extensiones y mantiene activo el throttling en segundo plano. Conservamos aceleración gráfica para compatibilidad con las ventanas transparentes en Wayland/X11.
 

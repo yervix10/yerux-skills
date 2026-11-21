@@ -208,9 +208,10 @@ async function createWidget() {
   }
 
   const local = session.fromPartition('widget');
-  const files = new Set(['index.html', 'style.css', 'renderer.js', 'metrics.js'].map(
-    (name) => pathToFileURL(path.join(__dirname, name)).href,
-  ));
+  const files = new Set([
+    ...['index.html', 'style.css', 'renderer.js', 'metrics.js'].map((name) => path.join(__dirname, name)),
+    path.join(root, 'assets', 'agent-bridge-64.png'),
+  ].map((filename) => pathToFileURL(filename).href));
   local.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !files.has(details.url) }));
   local.setPermissionCheckHandler(() => false);
   local.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

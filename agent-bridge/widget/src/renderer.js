@@ -14,7 +14,7 @@ const announcement = document.querySelector('#announcement');
 const list = document.querySelector('#agents');
 
 const states = {
-  admin: 'Admin', idle: 'En espera', working: 'Trabajando', limited: 'Limitado',
+  admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
   stuck: 'Atascado', off: 'Apagado', unknown: 'Desconocido',
 };
 const scale = { green: 'normal', amber: 'alto', red: 'crítico' };
@@ -34,28 +34,35 @@ function element(tag, className, text) {
   return node;
 }
 
-function metric(label, used, resetAt = null) {
-  const row = element('div', 'metric');
+function metric(label, used, resetAt = null, context = false) {
+  const row = element('div', `metric${context ? ' metric-context' : ''}`);
   const color = usageColor(used);
   row.append(element('span', 'metric-label', label));
   const value = used === null ? 'Sin dato' : percentFormat.format(used / 100);
+  const track = element('span', 'bar-wrap');
   if (used === null) {
-    const track = element('span', 'unknown-track');
-    track.setAttribute('aria-hidden', 'true');
-    row.append(track);
+    track.append(element('span', 'unknown-track'));
   } else {
     const bar = element('progress', color);
     bar.max = 100;
     bar.value = used;
     bar.setAttribute('aria-label', label);
     bar.setAttribute('aria-valuetext', `${value}, uso ${scale[color]}`);
-    row.append(bar);
+    track.append(bar);
   }
+  if (context) {
+    const mark = element('span', 'context-mark');
+    mark.style.left = '40%';
+    mark.setAttribute('aria-hidden', 'true');
+    track.append(mark);
+  }
+  row.append(track);
   row.append(element('span', 'percent', value));
   const countdown = element('span', 'countdown');
   if (resetAt !== null) {
     countdown.dataset.reset = resetAt;
     countdown.title = new Date(resetAt * 1000).toLocaleString('es');
+    countdown.setAttribute('aria-label', `Se reinicia en ${formatCountdown(resetAt)}`);
   }
   row.append(countdown);
   return row;
@@ -68,15 +75,16 @@ function highest(agent) {
 function agentCard(agent) {
   const card = element('article', `agent${settings.compact ? ' compact' : ''}`);
   const identity = element('div', 'identity');
+  const identityMain = element('div', 'identity-main');
   const name = element('h2', 'agent-name', agent.name);
   name.title = agent.name;
-  identity.append(name, element('span', `badge badge-${agent.role}`, agent.role),
-    element('span', 'badge', agent.kind));
-
-  const state = element('span', `state state-${agent.state}`, states[agent.state]);
-  identity.append(state);
-  if (agent.context !== null && agent.context > 40) identity.append(element('span', 'badge badge-warning', 'Compactará'));
-  if (agent.tier === 'skip') identity.append(element('span', 'badge badge-critical', 'Skip'));
+  identityMain.append(name, element('span', `state state-${agent.state}`, states[agent.state]));
+  identity.append(identityMain);
+  const labels = element('div', 'identity-labels');
+  labels.append(element('span', 'badge', agent.kind));
+  if (agent.context !== null && agent.context > 40) labels.append(element('span', 'badge badge-warning', 'Compactará'));
+  if (agent.tier === 'skip') labels.append(element('span', 'badge badge-critical', 'Skip'));
+  identity.append(labels);
   if (settings.compact) {
     card.append(identity, element('span', 'compact-percent', `${highest(agent)}%`), element('span', 'compact-tier', agent.tier || '—'));
     card.title = agent.detail || agent.name;
@@ -87,9 +95,10 @@ function agentCard(agent) {
   const metadata = element('div', 'metadata');
   const model = agent.model || agent.set_model || 'Modelo sin datos';
   const effort = agent.effort || agent.set_effort;
-  const modelLine = element('span', 'truncate', effort ? `${model} · ${effort}` : model);
+  const modelLine = element('span', 'model-badge truncate', model);
   modelLine.title = modelLine.textContent;
   metadata.append(modelLine);
+  if (effort) metadata.append(element('span', 'effort-badge', effort));
   if (agent.tier) {
     const tier = element('span', `tier tier-${agent.tier}`, agent.tier);
     tier.setAttribute('aria-label', `Capacidad ${agent.tier}`);
@@ -97,11 +106,13 @@ function agentCard(agent) {
   }
   card.append(metadata);
 
-  const project = [agent.project, agent.branch].filter(Boolean).join(' / ');
-  if (project) {
-    const line = element('p', 'project truncate', project);
-    line.title = project;
-    card.append(line);
+  if (agent.project || agent.branch) {
+    const contextLine = element('p', 'project truncate');
+    if (agent.project) contextLine.append(element('span', 'project-name', agent.project));
+    if (agent.project && agent.branch) contextLine.append(element('span', 'project-separator', ' / '));
+    if (agent.branch) contextLine.append(element('span', 'branch-name', agent.branch));
+    contextLine.title = [agent.project, agent.branch].filter(Boolean).join(' / ');
+    card.append(contextLine);
   }
   if (agent.detail && agent.detail !== '-') {
     const detail = element('p', 'detail truncate', agent.detail);
@@ -110,17 +121,15 @@ function agentCard(agent) {
   }
 
   const metrics = element('div', 'metrics');
-  metrics.append(metric('Contexto', agent.context));
-  const availableLimits = periods.map(([key, label]) => ({ key, label, usage: agent[key] }))
-    .filter(({ usage }) => usage.used !== null);
-  const tightest = availableLimits.sort((a, b) => a.usage.used - b.usage.used)[0]?.key;
+  metrics.append(metric('Contexto', agent.context, null, true));
+  const availableLimits = periods.map(([key]) => ({ key, usage: agent[key] })).filter(({ usage }) => usage.used !== null);
+  const highestLimit = availableLimits.sort((a, b) => b.usage.used - a.usage.used)[0];
+  const tightest = highestLimit?.usage.used >= 60 ? highestLimit.key : undefined;
   for (const [key, label] of periods) {
     const usage = agent[key];
-    if (usage.used !== null) {
-      const row = metric(label, usage.used, usage.resets_at);
-      if (key === tightest) row.classList.add('tightest-limit');
-      metrics.append(row);
-    }
+    const row = metric(label, usage.used, usage.resets_at);
+    if (key === tightest) row.classList.add('tightest-limit');
+    metrics.append(row);
   }
   card.append(metrics);
 
@@ -144,6 +153,7 @@ function updateClock() {
   for (const countdown of list.querySelectorAll('[data-reset]')) {
     const remaining = formatCountdown(Number(countdown.dataset.reset), now);
     if (countdown.textContent !== remaining) countdown.textContent = remaining;
+    countdown.setAttribute('aria-label', `Se reinicia en ${remaining}`);
   }
   const elapsed = snapshot.data ? Math.max(0, now - snapshot.data.time) : 0;
   let changed = false;
@@ -166,10 +176,9 @@ function render() {
   const { data, disconnected } = snapshot;
   const agents = sortAgents(data?.agents ?? [], settings.sort);
   const working = agents.filter(({ state }) => state === 'working').length;
-  const limited = agents.filter(({ state }) => state === 'limited').length;
-  const total = `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'}`;
-  const limits = `${limited} ${limited === 1 ? 'limitado' : 'limitados'}`;
-  const counts = data ? `${total} · ${working} trabajando · ${limits}` : 'Conectando…';
+  const idle = agents.filter(({ state }) => state === 'idle').length;
+  const alerts = agents.filter(({ state }) => ['limited', 'stuck', 'unknown'].includes(state)).length;
+  const counts = data ? `${working} trabajando · ${idle} libres · ${alerts} alertas` : 'Conectando…';
   summary.textContent = collapsed && disconnected ? 'Sin conexión con el bridge' : counts;
   summary.title = collapsed && disconnected && data ? counts : '';
   summary.classList.toggle('offline', collapsed && disconnected);
