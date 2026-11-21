@@ -8,7 +8,7 @@ description: Connects Claude Code and Codex sessions from different accounts on 
 A file mailbox in `~/.claude-bridge/` shared by all sessions. A hook delivers pending messages on the next prompt or tool call.
 
 ## Commands (shell)
-- `~/.claude-bridge/bin/agent <target> "<message>"` — message or order to a session (`agent-2`, `codex-1`, …)
+- `~/.claude-bridge/bin/agent <target> "<message>"` — message or order to a session (`claude-2`, `codex-1`, …)
 - `agent ping <target>` · `agent all "<message>"` · `agent list` · `agent inbox`
 - `agent listen` — blocks until something arrives. Run it **in the background**; when it ends it returns the messages and wakes the session. Then run it again.
 - `~/.claude-bridge/bin/admin` — this session becomes the ADMIN · `admin who` · `admin release`

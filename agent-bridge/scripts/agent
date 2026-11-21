@@ -70,7 +70,7 @@ case "$1" in
       if [ -z "$n" ]; then for w in $(awk -F= '{print $2}' "$R/names.conf"); do echo "$w: model $(cat "$R/models/$w" 2>/dev/null || echo default), effort $(cat "$R/effort/$w" 2>/dev/null || echo default)"; done; exit 0; fi
       [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] || { echo "only the admin can change a worker's $cmd (you are $me)" >&2; exit 1; }
       dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$R/names.conf")"; [ -n "$dir" ] || { echo "unknown worker: $n" >&2; exit 1; }
-      [ -n "$v" ] || { echo "usage: agent $cmd <worker> <$([ "$cmd" = effort ] && echo level || echo model)|default>   e.g. agent model agent-2 claude-opus-5-5 high" >&2; exit 1; }
+      [ -n "$v" ] || { echo "usage: agent $cmd <worker> <$([ "$cmd" = effort ] && echo level || echo model)|default>   e.g. agent model claude-2 claude-opus-5-5 high" >&2; exit 1; }
       setone() { local file="$1" val="$2" what="$3"
         if [ "$val" = default ]; then rm -f "$file"; echo "$n: $what back to its default (applies from its next order)"; return 0; fi
         if [ "$what" = effort ]; then case "$(basename "$dir")" in .claude*) levels="low medium high xhigh max";; *) levels="none minimal low medium high xhigh";; esac
