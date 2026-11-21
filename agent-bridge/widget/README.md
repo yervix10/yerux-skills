@@ -2,7 +2,7 @@
 
 Widget de escritorio para Linux, macOS y Windows que muestra los estados, el contexto y las cuotas de todos los agentes del bridge. Consulta el dashboard cada 5 s por defecto y recalcula las cuentas atrás cada segundo.
 
-![Ventana de Agent Bridge con seis agentes en una sesión de Linux](docs/screenshot.png)
+![Agent Bridge con Admin fijo y los grupos Trabajando y Libres desplegados](docs/screenshot.png)
 
 ## Instalación y uso
 
@@ -50,7 +50,7 @@ Para un adaptador de Node en Windows puedes usar una ruta como `C:\Bridge\agent-
 
 ## Interfaz y rendimiento
 
-La interfaz usa un tema oscuro acrílico y cambia a claro según `prefers-color-scheme`. La cabecera resume agentes trabajando, libres y con alertas. Cada tarjeta presenta el estado con chip semántico, modelo y esfuerzo, proyecto/rama, contexto con marca de referencia al 40 % y barras de uso de 5 h, semana y mes con umbrales de color y cuenta atrás. La vista compacta conserva una fila por agente; la detallada muestra métricas y detalles con tooltip. El scroll permanece dentro de la lista y el límite más alto se resalta cuando llega a 60 %. Las capturas de antes y después están en [before.png](docs/before.png) y [screenshot.png](docs/screenshot.png).
+La interfaz usa un tema oscuro acrílico y cambia a claro según `prefers-color-scheme`. Admin aparece fijo arriba; los demás agentes se agrupan en acordeones accesibles **Trabajando** (abierto inicialmente) y **Libres** (cerrado inicialmente, incluye idle, limitado y otros estados no activos). Los grupos vacíos se ocultan y el estado desplegado se guarda en `widget.json`. Cada tarjeta muestra solo las filas de contexto y cuotas que tienen uso o reinicio. La vista compacta conserva una fila por agente; la detallada muestra métricas con tooltip. Los acordeones reordenan agentes por urgencia dentro de cada grupo y mantienen los nodos de tarjeta al cambiar de grupo, además del scroll. La captura final muestra un codex solo mensual, otro con 5 h y semana, un Claude y un agente sin límites.
 
 Para reducir consumo, Chromium limita el heap V8 a 128 MiB, la caché de disco a 1 MiB, desactiva corrector y extensiones y mantiene activo el throttling en segundo plano. Conservamos aceleración gráfica para compatibilidad con las ventanas transparentes en Wayland/X11.
 

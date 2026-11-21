@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { parseDashboard } = require('../src/dashboard.cjs');
-const { formatCountdown, usageColor, sortAgents, normalizeSettings } = require('../src/metrics.js');
+const { formatCountdown, usageColor, sortAgents, normalizeSettings, partitionAgents, visibleMetrics, highestUsage } = require('../src/metrics.js');
 
 const usage = { used: null, resets_at: null };
 const agent = {
@@ -69,9 +69,47 @@ test('ordena primero admin y después agentes urgentes, y conserva orden manual'
   assert.deepEqual(sortAgents(agents, 'manual'), agents);
 });
 
+test('oculta métricas sin uso ni reinicio y conserva filas con solo reinicio', () => {
+  const monthlyOnly = { ...agent, context: null, five_hour: usage, weekly: usage,
+    monthly: { used: 42, resets_at: 4567 } };
+  assert.deepEqual(visibleMetrics(monthlyOnly).map(({ key }) => key), ['monthly']);
+  const shortAndWeekly = { ...agent, context: 24, five_hour: { used: 4, resets_at: 1234 },
+    weekly: { used: 70, resets_at: 5678 }, monthly: usage };
+  assert.deepEqual(visibleMetrics(shortAndWeekly).map(({ key }) => key), ['context', 'five_hour', 'weekly']);
+  const resetOnly = { ...agent, context: null, five_hour: { used: null, resets_at: 1234 }, weekly: usage, monthly: usage };
+  assert.deepEqual(visibleMetrics(resetOnly).map(({ key, used, resetsAt }) => ({ key, used, resetsAt })),
+    [{ key: 'five_hour', used: null, resetsAt: 1234 }]);
+  assert.deepEqual(visibleMetrics({ ...agent, context: null, five_hour: usage, weekly: usage, monthly: usage }), []);
+  assert.equal(highestUsage({ ...agent, context: null, five_hour: usage, weekly: usage, monthly: usage }), null);
+  assert.equal(highestUsage({ ...agent, context: 0, five_hour: usage, weekly: usage, monthly: usage }), 0);
+});
+
+test('separa admin fijo, trabajando y libres, y ordena urgencia dentro de los grupos', () => {
+  const agents = [
+    { name: 'idle', role: 'worker', state: 'idle' },
+    { name: 'working-b', role: 'worker', state: 'working' },
+    { name: 'admin', role: 'admin', state: 'admin' },
+    { name: 'stuck', role: 'worker', state: 'stuck' },
+    { name: 'limited', role: 'worker', state: 'limited' },
+    { name: 'working-a', role: 'worker', state: 'working' },
+    { name: 'off', role: 'worker', state: 'off' },
+  ];
+  const groups = partitionAgents(agents);
+  assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, values]) => [key, values.map(({ name }) => name)])), {
+    admins: ['admin'], working: ['working-a', 'working-b'], free: ['limited', 'stuck', 'idle', 'off'],
+  });
+});
+
 test('valida ajustes persistentes con valores permitidos y valores por defecto', () => {
   assert.deepEqual(normalizeSettings({ compact: true, sort: 'manual', opacity: 80, fontSize: 14 }),
-    { compact: true, sort: 'manual', opacity: 80, fontSize: 14 });
+    { compact: true, sort: 'manual', opacity: 80, fontSize: 14, groupOpen: { working: true, free: false } });
   assert.deepEqual(normalizeSettings({ compact: 1, sort: 'random', opacity: 1, fontSize: 99 }),
-    { compact: false, sort: 'urgency', opacity: 100, fontSize: 12 });
+    { compact: false, sort: 'urgency', opacity: 100, fontSize: 12, groupOpen: { working: true, free: false } });
+  assert.deepEqual(normalizeSettings({ groupOpen: { working: 0, free: 1 } }).groupOpen,
+    { working: true, free: false });
+});
+
+test('conserva abierto/cerrado de los acordeones en los ajustes JSON', () => {
+  const saved = JSON.parse(JSON.stringify({ groupOpen: { working: false, free: true } }));
+  assert.deepEqual(normalizeSettings(saved).groupOpen, { working: false, free: true });
 });

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('bridgeWidget', {
   },
   onSettings: (callback) => ipcRenderer.on('dashboard:settings', (_event, settings) => callback(settings)),
   visibility: (visible) => ipcRenderer.send('dashboard:visible', visible),
+  setGroupOpen: (group, open) => ipcRenderer.send('dashboard:group-open', group, open),
   layout: (height, collapsed, renderedData) => {
     ipcRenderer.send('dashboard:layout', height, collapsed, renderedData);
   },

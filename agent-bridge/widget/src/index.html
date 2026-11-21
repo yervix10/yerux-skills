@@ -25,7 +25,21 @@
     </header>
     <main id="content">
       <p id="connection" role="status" hidden>Sin conexión con el bridge</p>
-      <div id="agents"></div>
+      <div id="agents">
+        <section id="admins" class="agent-list" aria-label="Administración"></section>
+        <section id="group-working" class="agent-group">
+          <button class="group-toggle" id="toggle-working" type="button" aria-controls="list-working" aria-expanded="true">
+            <span class="group-title">Trabajando</span><span class="group-count" id="count-working">0</span><span class="group-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="group-list" id="list-working"></div>
+        </section>
+        <section id="group-free" class="agent-group">
+          <button class="group-toggle" id="toggle-free" type="button" aria-controls="list-free" aria-expanded="false">
+            <span class="group-title">Libres</span><span class="group-count" id="count-free">0</span><span class="group-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="group-list" id="list-free" hidden></div>
+        </section>
+      </div>
     </main>
     <p class="sr-only" id="announcement" role="status"></p>
   </div>

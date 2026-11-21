@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { fetchDashboard } = require('./poll.cjs');
+const { normalizeGroupOpen } = require('./metrics.js');
 
 const root = path.join(__dirname, '..');
 const width = 340;
@@ -14,7 +15,7 @@ const command = process.argv.includes('--widget-status') ? 'status'
   : process.argv.includes('--widget-stop') ? 'stop'
     : process.argv.includes('--widget-start') ? 'start' : 'show';
 const capture = process.argv.includes('--capture');
-const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency' };
+const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency', groupOpen: { working: true, free: false } };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
 const appIcon = path.join(root, 'assets', 'agent-bridge.png');
 
@@ -59,6 +60,7 @@ function readSettings() {
       opacity: [80, 90, 100].includes(stored.opacity) ? stored.opacity : defaults.opacity,
       fontSize: [11, 12, 14].includes(stored.fontSize) ? stored.fontSize : defaults.fontSize,
       sort: stored.sort === 'manual' ? 'manual' : 'urgency',
+      groupOpen: normalizeGroupOpen(stored.groupOpen),
       bounds: stored.bounds,
     };
   } catch {
@@ -261,6 +263,11 @@ async function createWidget() {
     if (!fromWidget(event) || typeof visible !== 'boolean') return;
     clearTimeout(pollingTimer);
     if (visible) poll(); else currentPoll?.abort();
+  });
+  ipcMain.on('dashboard:group-open', (event, group, open) => {
+    if (!fromWidget(event) || !['working', 'free'].includes(group) || typeof open !== 'boolean') return;
+    settings.groupOpen = { ...settings.groupOpen, [group]: open };
+    saveSettings();
   });
   ipcMain.on('dashboard:layout', (event, height, collapsed, renderedData) => {
     if (!fromWidget(event) || !Number.isSafeInteger(height) || typeof collapsed !== 'boolean') return;
