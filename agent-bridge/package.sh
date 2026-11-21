@@ -25,12 +25,21 @@ do_scripts() {
 do_path() { mkdir -p "$HOME/.local/bin" && ln -sfn "$BR/bin/agent" "$HOME/.local/bin/agent" && ln -sfn "$BR/bin/admin" "$HOME/.local/bin/admin"; }
 
 # Per-account install / uninstall.
+# wrap_statusline <settings.json> <name>: the account's status line keeps looking the same, but its JSON is also saved for `agent dashboard`
+wrap_statusline() { local f="$1" n="$2" cur mine="$BR/bin/bridge-statusline"; mkdir -p "$BR/statusline"
+  cur="$(jq -r '.statusLine.command // empty' "$f" 2>/dev/null)"; [ "$cur" = "$mine" ] && return 0
+  printf '%s' "$cur" > "$BR/statusline/$n.orig"
+  jq --arg c "$mine" '.statusLine = {type:"command", command:$c}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; }
+unwrap_statusline() { local f="$1" n="$2" orig; [ -f "$BR/statusline/$n.orig" ] || return 0; orig="$(cat "$BR/statusline/$n.orig")"
+  if [ -n "$orig" ]; then jq --arg c "$orig" '.statusLine = {type:"command", command:$c}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; else jq 'del(.statusLine)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; fi
+  rm -f "$BR/statusline/$n.orig"; }
 in_claude_ab() { local d="$1" n; n="$(get_name "$d")"
   [ $DRY = 1 ] && { :; return 0; }
   mkdir -p "$d/commands" "$d/skills/agent-bridge" "$BR/inbox/$n"
   [ -f "$d/settings.json" ] || echo '{}' > "$d/settings.json"
   jq --arg n "$n" '.env = ((.env // {}) + {BRIDGE_NAME:$n}) | del(.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"
   [ $OPT_HOOKS = 1 ] && add_hooks "$d/settings.json" "$HOOK"
+  [ "${OPT_STATUSLINE:-0}" = 1 ] && wrap_statusline "$d/settings.json" "$n"
   if [ $OPT_SKILL = 1 ]; then cp "$SRC"/commands/*.md "$d/commands/"; cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"; fi
   return 0; }
 in_codex_ab() { local d="$1" n f; n="$(get_name "$d")"
@@ -46,7 +55,8 @@ in_codex_ab() { local d="$1" n f; n="$(get_name "$d")"
 ab_install_claude() { in_claude_ab "$1"; }
 ab_install_codex() { in_codex_ab "$1"; }
 ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
-  del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }
+  del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && unwrap_statusline "$d/settings.json" "$(get_name "$d")"
+  [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }
   rm -rf "$d/skills/agent-bridge" "$d/commands/admin.md" "$d/commands/agent.md"; return 0; }
 ab_un_codex() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/hooks.json"; command -v python3 >/dev/null 2>&1 && python3 "$SRC/scripts/codex-trust-hooks" "$d" --prune >/dev/null 2>&1

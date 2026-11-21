@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# bridge-usage <name>: prints one tab-separated line "model  project  branch  ctx%  5h%  week%  age_seconds" for an agent
+# ("-" = unknown). Codex: read from its latest session file (the same data its UI shows). Claude: from its worker's live log.
+B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
+dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
+now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""
+case "$(basename "$dir")" in
+  .codex*)
+    f="$(find "$dir/sessions" -name '*.jsonl' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
+    if [ -n "$f" ]; then
+      at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
+      tail -n 400 "$f" > "${TMPDIR:-/tmp}/bu.$$"
+      model="$(jq -r 'select(.type=="turn_context")|.payload.model' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
+      cwd="$(jq -r 'select(.type=="turn_context")|.payload.cwd' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
+      [ -n "$cwd" ] || cwd="$(head -1 "$f" | jq -r '.payload.cwd // empty' 2>/dev/null)"
+      row="$(jq -r --argjson now "$now" 'select(.type=="event_msg" and .payload.type=="token_count" and .payload.rate_limits!=null)|
+        [ (if .payload.info.model_context_window then ((.payload.info.last_token_usage.total_tokens*100/.payload.info.model_context_window)|floor) else "" end),
+          ([.payload.rate_limits.primary,.payload.rate_limits.secondary][]|select(.!=null)|select(.window_minutes<=600)|(if .resets_at<$now then 0 else (.used_percent|floor) end))//"",
+          ([.payload.rate_limits.primary,.payload.rate_limits.secondary][]|select(.!=null)|select(.window_minutes>600)|(if .resets_at<$now then 0 else (.used_percent|floor) end))//"" ]|@tsv' "${TMPDIR:-/tmp}/bu.$$" 2>/dev/null | tail -1)"
+      rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; wk="$(printf '%s' "$row" | cut -f3)"
+    fi;;
+  .claude*)
+    f="$B/logs/$name.live"; u="$B/usage/$name.json"
+    # interactive session: the JSON saved by bridge-statusline (installer --statusline) is the freshest source
+    if [ -s "$u" ] && { [ ! -s "$f" ] || [ "$u" -nt "$f" ]; }; then
+      at="$(stat -c %Y "$u" 2>/dev/null || stat -f %m "$u" 2>/dev/null)"
+      model="$(jq -r '.model.display_name // empty' "$u" 2>/dev/null)"; cwd="$(jq -r '.workspace.current_dir // .cwd // empty' "$u" 2>/dev/null)"
+      ctx="$(jq -r '.context_window.used_percentage // empty|floor' "$u" 2>/dev/null)"
+      h5="$(jq -r '.rate_limits.five_hour.used_percentage // empty|floor' "$u" 2>/dev/null)"; wk="$(jq -r '.rate_limits.seven_day.used_percentage // empty|floor' "$u" 2>/dev/null)"
+    elif [ -s "$f" ]; then
+      at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
+      model="$(jq -r 'select(.type=="system" and .subtype=="init")|.model' "$f" 2>/dev/null | tail -1)"
+      cwd="$(jq -r 'select(.type=="system" and .subtype=="init")|.cwd' "$f" 2>/dev/null | tail -1)"
+      row="$(jq -r 'select(.type=="rate_limit_event")|.rate_limit_info|[((.unifiedWindows.five_hour.utilization // empty)*100|floor), ((.unifiedWindows.seven_day.utilization // empty)*100|floor)]|@tsv' "$f" 2>/dev/null | tail -1)"
+      h5="$(printf '%s' "$row" | cut -f1)"; wk="$(printf '%s' "$row" | cut -f2)"
+    fi;;
+esac
+proj=""; br=""; if [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
+age=""; [ -n "$at" ] && age=$((now - at))
+# "-" stands for unknown so tab-splitting (which collapses empty fields) keeps the columns aligned
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}"

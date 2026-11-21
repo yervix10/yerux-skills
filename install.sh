@@ -3,12 +3,12 @@
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
-# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
+# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
 DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""
-YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
+YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=0; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
 tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#$HOME}";; *) printf '%s' "$1";; esac; }
@@ -19,7 +19,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # ---------- arguments ----------
 while [ $# -gt 0 ]; do case "$1" in
   --skills) [ -n "${2:-}" ] || die "--skills needs a list (a,b | all | none)"; SKILLS_ARG="$2"; shift;;
-  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --safe) OPT_BYPASS=safe;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;; --fix) FIX=1;;
+  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --safe) OPT_BYPASS=safe;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --statusline) OPT_STATUSLINE=1;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;; --fix) FIX=1;;
   --name) [ -n "${2:-}" ] || die "--name needs DIR=NAME"; OVERS="$OVERS
 ${2%%=*}=${2#*=}"; shift;;
   --claude-dir) [ -n "${2:-}" ] || die "--claude-dir needs a path"; CLAUDE_LIST="$CLAUDE_LIST

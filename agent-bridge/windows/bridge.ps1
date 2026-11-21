@@ -89,6 +89,39 @@ function Get-Epoch { return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
 function Read-State($n) { $h = @{}; $f = Join-Path $B "runs\$n.state"
   if (Test-Path $f) { foreach ($l in (Get-Content $f -Encoding UTF8 -ErrorAction SilentlyContinue)) { $p = $l.Split('=', 2); if ($p.Count -eq 2) { $h[$p[0]] = $p[1] } } }
   return $h }
+# Get-Usage: model / project / branch / context % / 5h % / week % of an agent. Codex: from its latest session file (the data its UI shows).
+# Claude: from its worker's live log. '' = unknown.
+function Get-Usage($n) {
+  $o = @{ model = ''; proj = ''; br = ''; ctx = ''; h5 = ''; wk = ''; age = '' }; $dir = Lookup-NameDir $n; if (-not $dir) { return $o }
+  $leaf = Split-Path $dir -Leaf; $now = Get-Epoch; $cwd = ''
+  if ($leaf -like '.codex*') {
+    $f = Get-ChildItem (Join-Path $dir 'sessions') -Recurse -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($f) {
+      $o.age = $now - [DateTimeOffset]::new($f.LastWriteTimeUtc).ToUnixTimeSeconds()
+      foreach ($l in @(Get-Content -LiteralPath $f.FullName -Tail 400 -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        try { $e = $l | ConvertFrom-Json } catch { continue }
+        if ($e.type -eq 'turn_context') { $o.model = [string]$e.payload.model; $cwd = [string]$e.payload.cwd }
+        elseif ($e.type -eq 'event_msg' -and $e.payload.type -eq 'token_count' -and $e.payload.rate_limits) {
+          $i = $e.payload.info
+          if ($i -and $i.model_context_window) { $o.ctx = [int][Math]::Floor($i.last_token_usage.total_tokens * 100 / $i.model_context_window) }
+          foreach ($w in @($e.payload.rate_limits.primary, $e.payload.rate_limits.secondary)) {
+            if (-not $w) { continue }; $pct = if ([int64]$w.resets_at -lt $now) { 0 } else { [int][Math]::Floor($w.used_percent) }
+            if ($w.window_minutes -le 600) { $o.h5 = $pct } else { $o.wk = $pct } } } } } }
+  elseif ($leaf -like '.claude*') {
+    $lf = Join-Path $B "logs\$n.live"
+    if (Test-Path $lf) {
+      $o.age = $now - [DateTimeOffset]::new((Get-Item $lf).LastWriteTimeUtc).ToUnixTimeSeconds()
+      foreach ($l in @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        $l = $l.TrimStart([char]0xFEFF); if (-not $l.StartsWith('{')) { continue }; try { $e = $l | ConvertFrom-Json } catch { continue }
+        if ($e.type -eq 'system' -and $e.subtype -eq 'init') { $o.model = [string]$e.model; $cwd = [string]$e.cwd }
+        elseif ($e.type -eq 'rate_limit_event' -and $e.rate_limit_info.unifiedWindows) {
+          $u = $e.rate_limit_info.unifiedWindows
+          if ($u.five_hour) { $o.h5 = [int][Math]::Floor([double]$u.five_hour.utilization * 100) }; if ($u.seven_day) { $o.wk = [int][Math]::Floor([double]$u.seven_day.utilization * 100) } } } } }
+  if ($cwd) { $o.proj = Split-Path $cwd -Leaf; if ((Test-Path $cwd) -and (Get-Command git -ErrorAction SilentlyContinue)) { $b = (& git -C $cwd rev-parse --abbrev-ref HEAD 2>$null); if ($LASTEXITCODE -eq 0) { $o.br = [string]$b } } }
+  return $o }
+function Write-Pct($v) {
+  if ($v -eq '') { Write-Host '-' -ForegroundColor DarkGray -NoNewline; return }
+  $c = if ([int]$v -ge 85) { 'Red' } elseif ([int]$v -ge 60) { 'Yellow' } else { 'Green' }; Write-Host "$v%" -ForegroundColor $c -NoNewline }
 function Invoke-Agent($a) {
   switch ($a[0]) {
     'ping'   { Send-Msg $a[1] "ping from $me ($((Get-Date).ToString('HH:mm:ss')))" }
@@ -147,7 +180,18 @@ function Invoke-Agent($a) {
           if (-not $yes) { Write-Output "would remove $d and delete branch mejora/$wn if it is merged (add --yes)"; return }
           & git -C $root worktree remove $d; if ($LASTEXITCODE -eq 0) { & git -C $root branch -d "mejora/$wn" } }
         default { Write-Error 'agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]' } } }
-    'dashboard' { try { while ($true) { Clear-Host; Write-Output "agent-bridge  $((Get-Date).ToString('HH:mm:ss'))   (Ctrl+C to exit)"; Write-Output ''; Invoke-Agent @('status'); Start-Sleep -Seconds 2 } } finally { } }
+    'dashboard' {
+      while ($true) { Clear-Host; Write-Host 'agent-bridge ' -NoNewline -ForegroundColor White; Write-Host "$((Get-Date).ToString('HH:mm:ss'))   (Ctrl+C to exit)" -ForegroundColor DarkGray; Write-Host ''
+        $lines = @(Invoke-Agent @('status'))
+        foreach ($n in (Get-Names)) {
+          $u = Get-Usage $n; $d = { param($x) if ($x -ne '') { $x } else { '-' } }; $sep = ' | '
+          Write-Host ("{0,-9} " -f $n) -NoNewline -ForegroundColor White
+          Write-Host ("$(& $d $u.model)$sep$(& $d $u.proj)$sep$(& $d $u.br)$sep") -NoNewline; Write-Host 'ctx ' -NoNewline; Write-Pct $u.ctx
+          Write-Host '  5h ' -NoNewline; Write-Pct $u.h5; Write-Host '  sem ' -NoNewline; Write-Pct $u.wk
+          if ($u.age -ne '' -and [int64]$u.age -gt 600) { Write-Host " (data $([int]([int64]$u.age / 60)) min old)" -NoNewline -ForegroundColor DarkGray }
+          Write-Host ''; $st = $lines | Where-Object { $_ -like "${n}:*" } | Select-Object -First 1
+          Write-Host ("          " + ([string]$st -replace "^${n}:\s*", '')) -ForegroundColor DarkGray }
+        Start-Sleep -Seconds 2 } }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
       Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }

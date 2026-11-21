@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+- `agent dashboard` shows per agent what the Claude status line shows: model, project, branch, context %, 5h and weekly usage
+  (coloured by how full they are) plus the worker state. Codex agents: read from their latest session file
+  (`bridge-usage`). Claude agents: worker live log, or the saved status line JSON with `./install.sh --statusline`
+  (a wrapper that keeps the original bar; `--uninstall` restores it). Windows: Codex and Claude worker data, no status line wrapper.
+
 ## 1.2.0
 - CI (GitHub Actions): shell syntax + `tests/run.sh` on Linux, macOS (best effort), PowerShell parse on Windows.
 - Tests now cover Codex workers, reassignment, `agent wt`, and install / `--check` / `--fix` / uninstall in an isolated HOME.

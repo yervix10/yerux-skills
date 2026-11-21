@@ -102,4 +102,25 @@ check "--fix restores it" "$([ -f "$H/.claude-a/skills/agent-bridge/SKILL.md" ] 
 inst --uninstall --claude-dir "$H/.claude-a" --codex-dir "$H/.codex-b" >/dev/null 2>&1
 check "uninstall removes the Codex approvals" "$(grep -c trusted_hash "$H/.codex-b/config.toml" 2>/dev/null | tr -d '\n')" "0"
 
+echo "dashboard data (bridge-usage) and statusline wrapper"; export PATH="$OLDPATH"
+mkdir -p "$T/home/.codex-fake/sessions/2026/01/01"; NOW=$(date +%s)
+{ echo '{"type":"turn_context","payload":{"model":"gpt-test","cwd":"'"$T"'/proj"}}'
+  echo '{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":1000,"last_token_usage":{"total_tokens":260}},"rate_limits":{"primary":{"used_percent":47.5,"window_minutes":300,"resets_at":'$((NOW+999))'},"secondary":{"used_percent":90.2,"window_minutes":10080,"resets_at":'$((NOW+9999))'}}}}'; } > "$T/home/.codex-fake/sessions/2026/01/01/rollout.jsonl"
+U="$("$S/bridge-usage" w2)"
+check "codex model"   "$(echo "$U" | cut -f1)" "gpt-test"
+check "codex project" "$(echo "$U" | cut -f2)" "proj"
+check "codex branch"  "$(echo "$U" | cut -f3)" "$(git -C "$T/proj" rev-parse --abbrev-ref HEAD)"
+check "codex ctx 26%" "$(echo "$U" | cut -f4)" "26"
+check "codex 5h 47%"  "$(echo "$U" | cut -f5)" "47"
+check "codex week 90%" "$(echo "$U" | cut -f6)" "90"
+H2="$T/ihome2"; mkdir -p "$H2/.claude-a"; echo '{"statusLine":{"type":"command","command":"echo ORIG-BAR"}}' > "$H2/.claude-a/settings.json"
+( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --yes --no-path --no-trust --statusline --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
+OUT="$(printf '{"model":{"display_name":"Sonnet"},"workspace":{"current_dir":"%s"},"context_window":{"used_percentage":30},"rate_limits":{"five_hour":{"used_percentage":50},"seven_day":{"used_percentage":70}}}' "$T/proj" | BRIDGE_DIR="$H2/.claude-bridge" BRIDGE_NAME="$(awk -F= '{print $2}' "$H2/.claude-bridge/names.conf" | head -1)" "$H2/.claude-bridge/bin/bridge-statusline")"
+check "wrapper keeps the original bar" "$OUT" "ORIG-BAR"
+UN="$(awk -F= '{print $2}' "$H2/.claude-bridge/names.conf" | head -1)"
+printf '{"model":{"display_name":"Sonnet"},"workspace":{"current_dir":"%s"},"context_window":{"used_percentage":30},"rate_limits":{"five_hour":{"used_percentage":50},"seven_day":{"used_percentage":70}}}' "$T/proj" | BRIDGE_DIR="$H2/.claude-bridge" BRIDGE_NAME="$UN" "$H2/.claude-bridge/bin/bridge-statusline" >/dev/null
+check "claude usage from the saved JSON" "$(BRIDGE_DIR="$H2/.claude-bridge" "$H2/.claude-bridge/bin/bridge-usage" "$UN" | cut -f1,4,5,6 | tr '\t' ' ')" "Sonnet 30 50 70"
+( cd "$ROOT" && HOME="$H2" BRIDGE_DIR= ./install.sh --uninstall --claude-dir "$H2/.claude-a" >/dev/null 2>&1 )
+check "uninstall restores the original status line" "$(jq -r '.statusLine.command' "$H2/.claude-a/settings.json")" "echo ORIG-BAR"
+
 echo; echo "passed: $pass  failed: $fail"; [ $fail = 0 ]

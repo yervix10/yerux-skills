@@ -43,7 +43,18 @@ case "$1" in
         *) echo "agent wt list | diff <name> | merge <name> [--yes] | clean <name> [--yes]" >&2; exit 1;;
       esac;;
   dashboard) trap 'printf "\033[?25h"; exit 0' INT TERM; printf '\033[?25l'
-      while :; do printf '\033[H\033[2J'; echo "agent-bridge  $(date +%T)   (Ctrl+C to exit)"; echo; "$0" status; sleep 2; done;;
+      pct() { # <value> -> "47%" coloured by how full it is
+        [ -z "$1" ] && { printf '\033[2m–\033[0m'; return; }; c=32; [ "$1" -ge 60 ] && c=33; [ "$1" -ge 85 ] && c=31; printf '\033[%sm%s%%\033[0m' "$c" "$1"; }
+      while :; do printf '\033[H\033[2J'; printf '\033[1magent-bridge\033[0m  %s   \033[2m(Ctrl+C to exit)\033[0m\n\n' "$(date +%T)"
+        st="$("$0" status)"
+        for n in $(awk -F= '{print $2}' "$R/names.conf"); do
+          IFS=$'\t' read -r model proj br ctx h5 wk age < <("$D/bridge-usage" "$n" 2>/dev/null)
+          for v in model proj br ctx h5 wk age; do [ "${!v}" = - ] && printf -v "$v" ''; done
+          state="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"
+          printf '\033[1m%-9s\033[0m %s \033[2m|\033[0m %s \033[2m|\033[0m %s \033[2m|\033[0m ctx %s \033[2m|\033[0m 5h %s \033[2m|\033[0m sem %s' "$n" "${model:-–}" "${proj:-–}" "${br:-–}" "$(pct "$ctx")" "$(pct "$h5")" "$(pct "$wk")"
+          [ -n "$age" ] && [ "$age" -gt 600 ] && printf ' \033[2m(data %s min old)\033[0m' $((age / 60))
+          printf '\n          \033[2m%s\033[0m\n' "$state"; done
+        sleep 2; done;;
   logs) [ -f "$R/runs/$2.state" ] && sed -n 's/^status=/status: /p;s/^order=/order: /p;s/^activity=/doing: /p;s/^last_kind=/last result: /p' "$R/runs/$2.state"; tail -n "${3:-30}" "$R/logs/$2.log";;
   reset) rm -rf "$R/sessions/$2" && echo "memory of $2 cleared";;
   list) "$D/bridge-send" --list ;;
