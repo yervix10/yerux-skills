@@ -15,6 +15,8 @@ The desktop widget shows a read-only activity feed when you select an agent card
 
 The detail-panel capture can be refreshed from the widget folder with `./node_modules/.bin/electron . --capture --capture-feed`; it selects a current dashboard agent and writes `docs/screenshot.png`.
 
+The agent detail panel renders safe lightweight Markdown, code blocks with copy buttons, tool activity, and newest-first live updates. Start the widget from the admin session to enable worker controls; the IPC checks the dashboard agent name and admin marker, then the CLI rechecks admin identity. Model and effort changes take effect on the next order. Claude offers Sonnet and Haiku; Opus requires explicit confirmation. Codex model choices come from that account's visible CLI model list. The interactive admin session's controls are disabled; use `/model` or `/compact` in its terminal. **Compact now** confirms first and queues a worker compaction immediately when idle, or before its next order when busy. The CLI equivalent is `agent compact <worker>` (admin only).
+
     ./install.sh --list      # detected accounts
     ./install.sh --dry-run
     ./install.sh             # install

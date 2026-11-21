@@ -17,7 +17,11 @@ const workingGroup = { section: document.querySelector('#group-working'), button
 const freeGroup = { section: document.querySelector('#group-free'), button: document.querySelector('#toggle-free'), count: document.querySelector('#count-free'), list: document.querySelector('#list-free') };
 const detailView = document.querySelector('#detail-view');
 let detailName = null; let detailTimer = null; let detailPinned = true; let detailScroll;
+let activeAgent = null; let newestEventKey = ''; let newEventCount = 0; let pendingControl = null;
+const controlOptionsCache = new Map();
 let captureFeed = false;
+const toolGroupsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-groups-open') || '[]'));
+const toolDetailsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-details-open') || '[]'));
 
 const states = {
   admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
@@ -256,23 +260,154 @@ async function refreshDetail() {
   if (!detailName || detailView.hidden) return;
   const data = await window.bridgeWidget.readFeed(detailName);
   if (!data || detailName !== data.name) return;
+  const agent = snapshot.data?.agents?.find((item) => item.name === detailName);
+  if (!agent) return;
+  activeAgent = agent;
+  document.querySelector('#detail-title').textContent = agent.name;
+  configureControls(agent);
   const status = document.querySelector('#detail-status');
   const age = data.state.since ? Math.max(0, Math.floor(Date.now()/1000-data.state.since)) : 0;
   status.textContent = data.state.status === 'working' ? `Trabajando hace ${age >= 60 ? `${Math.floor(age/60)} min` : `${age} s`} · ahora: ${data.state.activity || '…'}` : `Estado: ${data.state.status}`;
-  const box = document.querySelector('#detail-events'); const wasBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  const box = document.querySelector('#detail-events'); const wasRecent = box.scrollTop < 30;
+  const oldHeight = box.scrollHeight; const oldTop = box.scrollTop;
+  const events = [...data.events].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+  const newest = events[0]; const nextKey = newest ? `${newest.ts}|${newest.role}|${newest.text}` : '';
+  if (newestEventKey && nextKey && newestEventKey !== nextKey && !wasRecent) newEventCount += Math.max(1, events.filter(e => Date.parse(e.ts) > Date.parse(newestEventKey.split('|')[0])).length);
+  if (!newestEventKey) { newEventCount = 0; }
+  newestEventKey = nextKey;
   box.replaceChildren();
-  for (const event of data.events) {
-    const row = element('div', `feed-${event.role}`);
-    row.append(element('small', '', `${new Date(event.ts).toLocaleTimeString('es')} · ${event.role === 'order' ? 'Orden del admin' : event.role === 'tool' ? 'Herramienta' : event.role === 'result' ? 'Resultado' : event.role === 'system' ? 'Sistema' : 'Agente'}`));
-    row.append(element('div', event.role === 'tool' ? 'feed-tool' : '', event.role === 'tool' ? `${event.tool || 'acción'}  ${event.text}` : event.text)); box.append(row);
+  let previousDay = '';
+  for (let i = 0; i < events.length;) {
+    const event = events[i];
+    const day = new Date(event.ts).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+    if (day !== previousDay) { box.append(element('div', 'feed-day', day)); previousDay = day; }
+    const timestamp = new Date(event.ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    if (event.role === 'tool' || event.role === 'tool_result') {
+      const groupStart = i; const groupEvents = [];
+      while (i < events.length && ['tool', 'tool_result'].includes(events[i].role)) groupEvents.push(events[i++]);
+      const key = groupEvents.map(toolEventKey).join('~');
+      const rowsId = `feed-tool-rows-${groupStart}`;
+      const group = element('section', 'feed-tool-group');
+      const head = element('button', 'feed-tool-group-head'); head.type = 'button'; head.setAttribute('aria-controls', rowsId); head.setAttribute('aria-expanded', String(toolGroupsOpen.has(key)));
+      const calls = groupEvents.filter(item => item.role === 'tool');
+      const results = groupEvents.filter(item => item.role === 'tool_result');
+      const label = element('span', '', `Herramientas (${calls.length})`);
+      const counts = new Map(); for (const item of calls) counts.set(item.tool || 'Herramienta', (counts.get(item.tool || 'Herramienta') || 0) + 1);
+      const names = [...counts].map(([name, count]) => `${name}${count > 1 ? ` ×${count}` : ''}`).join(', ');
+      head.append(label, element('span', 'feed-tool-group-summary', names));
+      const inProgress = groupStart === 0 && snapshot.data?.state?.status === 'working';
+      if (inProgress) head.append(element('span', 'feed-tool-running', 'en curso…'));
+      head.append(element('span', 'feed-tool-chevron', '⌄'));
+      head.addEventListener('click', () => { if (toolGroupsOpen.has(key)) toolGroupsOpen.delete(key); else toolGroupsOpen.add(key); localStorage.setItem('bridge-tool-groups-open', JSON.stringify([...toolGroupsOpen])); refreshDetail(); });
+      const rows = element('div', 'feed-tool-rows'); rows.id = rowsId; rows.hidden = !toolGroupsOpen.has(key);
+      for (let toolIndex = 0; toolIndex < calls.length; toolIndex++) {
+        const item = calls[toolIndex]; const result = results[toolIndex];
+        const itemKey = toolEventKey(item); const detailId = `feed-tool-detail-${groupStart}-${toolIndex}`; const details = element('div', 'feed-tool-detail');
+        const row = element('button', 'feed-tool-row'); row.type = 'button'; row.setAttribute('aria-controls', detailId); row.setAttribute('aria-expanded', String(toolDetailsOpen.has(itemKey)));
+        row.append(element('strong', 'feed-tool-name', item.tool || 'Herramienta'));
+        row.append(element('span', 'feed-tool-summary', safeToolSummary(item.text || '')));
+        const running = inProgress && toolIndex === 0;
+        const failed = result && /error|fail|denied|timeout/i.test(result.text);
+        row.append(element('span', `feed-tool-status ${running ? 'is-running' : failed ? 'is-error' : 'is-ok'}`, running ? '…' : failed ? 'Error' : 'OK'));
+        row.addEventListener('click', () => { if (toolDetailsOpen.has(itemKey)) toolDetailsOpen.delete(itemKey); else toolDetailsOpen.add(itemKey); localStorage.setItem('bridge-tool-details-open', JSON.stringify([...toolDetailsOpen])); refreshDetail(); });
+        const full = element('pre', 'feed-tool-full', `${safeToolSummary(item.text || '')}${result ? `\n\nResultado:\n${result.text}` : ''}`); full.id = detailId; full.hidden = !toolDetailsOpen.has(itemKey); details.append(row, full); rows.append(details);
+      }
+      group.append(head, rows); box.append(group); continue;
+    }
+    i++;
+    const role = event.role === 'order' ? 'admin' : event.role;
+    const row = element('article', `feed-message feed-${role}`);
+    row.dataset.eventKey = `${event.ts}|${event.role}|${event.text}`;
+    const byline = element('div', 'feed-byline');
+    byline.append(element('strong', '', event.role === 'order' ? `Admin · ${snapshot.data?.agents?.find(a => a.role === 'admin')?.name || 'admin'}` : agent.name));
+    byline.append(element('time', '', timestamp));
+    if (event.role === 'result') byline.append(element('span', `feed-result-chip ${/error|fail|timeout|limit/i.test(event.text) ? 'is-error' : 'is-ok'}`, /error|fail|timeout|limit/i.test(event.text) ? 'Error' : 'OK'));
+    row.append(byline);
+    const body = element('div', 'feed-body'); renderMarkdown(body, event.text || ''); row.append(body); box.append(row);
   }
-  if (detailPinned && wasBottom) box.scrollTop = box.scrollHeight;
-  if (captureFeed) reportLayout(true);
+  const newButton = document.querySelector('#new-events');
+  newButton.hidden = newEventCount === 0;
+  newButton.textContent = `${newEventCount} nuevos · Ir a lo más reciente`;
+  if (wasRecent) { box.scrollTop = 0; detailPinned = true; newEventCount = 0; newButton.hidden = true; }
+  else if (oldHeight) box.scrollTop = oldTop + (box.scrollHeight - oldHeight);
+  reportLayout(captureFeed);
 }
-function openDetail(name) { detailName = name; detailView.hidden = false; document.querySelector('#agents').hidden = true; detailPinned = true; refreshDetail(); clearInterval(detailTimer); detailTimer = setInterval(refreshDetail, 3000); reportLayout(); }
-function closeDetail() { detailName = null; clearInterval(detailTimer); detailView.hidden = true; document.querySelector('#agents').hidden = false; reportLayout(); }
+function toolEventKey(event) { return `${event.ts}|${event.tool || ''}|${event.text || ''}`; }
+function safeToolSummary(text) {
+  try { const value = JSON.parse(text); if (value && typeof value === 'object') return Object.entries(value).slice(0, 3).map(([k,v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · '); } catch {}
+  return text;
+}
+function renderInline(parent, value) {
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|(?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)+|\b(?:npm|git|agent|codex|claude)\s+[\w.-]+(?:\s+[\w./-]+)?|\b[0-9a-f]{7,40}\b)/gi;
+  let at = 0; let match;
+  while ((match = pattern.exec(value))) {
+    if (match.index > at) parent.append(document.createTextNode(value.slice(at, match.index)));
+    const token = match[0];
+    if (token.startsWith('`')) parent.append(element('code', 'feed-inline-code', token.slice(1, -1)));
+    else if (token.startsWith('**')) parent.append(element('strong', '', token.slice(2, -2)));
+    else parent.append(element('code', 'feed-inline-code feed-code-badge', token));
+    at = match.index + token.length;
+  }
+  if (at < value.length) parent.append(document.createTextNode(value.slice(at)));
+}
+function renderMarkdown(parent, value) {
+  const lines = String(value).split('\n'); let inCode = false; let code = []; let language = ''; let listNode = null;
+  const flushList = () => { listNode = null; };
+  for (const line of lines) {
+    const fence = line.match(/^\s*```\s*([\w+-]*)/);
+    if (fence && !inCode) { flushList(); inCode = true; language = fence[1] || 'code'; code = []; continue; }
+    if (inCode && /^\s*```/.test(line)) {
+      const block = element('section', 'feed-code-block'); const head = element('div', 'feed-code-head');
+      head.append(element('span', '', language)); const copy = element('button', '', 'Copiar'); copy.type = 'button';
+      const text = code.join('\n'); copy.addEventListener('click', async () => { await window.bridgeWidget.copyText(text); copy.textContent = 'Copiado'; setTimeout(() => { copy.textContent = 'Copiar'; }, 1200); });
+      head.append(copy); block.append(head); block.append(element('pre', '', text)); parent.append(block); inCode = false; continue;
+    }
+    if (inCode) { code.push(line); continue; }
+    if (!line.trim()) { flushList(); continue; }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) { flushList(); const h=element(`h${heading[1].length + 2}`, 'feed-heading'); renderInline(h, heading[2]); parent.append(h); continue; }
+    const item = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)$/);
+    if (item) { if (!listNode) { listNode=element('ul','feed-list'); parent.append(listNode); } const li=element('li'); renderInline(li,item[1]); listNode.append(li); continue; }
+    flushList(); const p=element('p'); renderInline(p,line); parent.append(p);
+  }
+  if (inCode) { const block=element('pre','feed-code-block feed-code-incomplete',code.join('\n')); parent.append(block); }
+}
+async function configureControls(agent) {
+  const worker = agent.role !== 'admin';
+  document.querySelector('#worker-controls').hidden = !worker;
+  document.querySelector('#admin-controls-note').hidden = worker;
+  document.querySelector('#copy-compact').hidden = worker;
+  if (!worker) return;
+  let options = controlOptionsCache.get(agent.name);
+  if (!options) { options = window.bridgeWidget.controlOptions(agent.name); controlOptionsCache.set(agent.name, options); }
+  options = await options;
+  if (options) controlOptionsCache.set(agent.name, options);
+  if (!options || detailName !== agent.name) return;
+  document.querySelector('#next-order-note').textContent = `Activo: ${agent.model || 'predeterminado'} · esfuerzo ${agent.effort || 'predeterminado'}. Cambios desde la próxima orden.`;
+  document.querySelector('#control-security-note').hidden = options.authorized;
+  for (const control of document.querySelectorAll('#worker-controls select, #worker-controls button')) control.disabled = !options.authorized;
+  const fill = (id, values, current) => { const select=document.querySelector(id); if(select.options.length && select.dataset.agent===agent.name) return; select.replaceChildren(); for(const value of values){const option=element('option','',value);option.value=value;select.append(option);} select.value=current;select.dataset.agent=agent.name; };
+  fill('#model-select',options.model,options.configuredModel); fill('#effort-select',options.effort,options.configuredEffort);
+}
+async function executeControl(action,value,confirmed=false) {
+  if (!activeAgent) return;
+  const feedback=document.querySelector('#control-feedback'); feedback.textContent='Aplicando…';
+  const result=await window.bridgeWidget.control({action,name:activeAgent.name,value,confirmed});
+  feedback.textContent=result?.message || (result?.ok ? 'Hecho' : 'No se pudo completar');
+  if (result?.ok) { newestEventKey=''; controlOptionsCache.delete(activeAgent.name); if(action==='compact') refreshDetail(); else configureControls(activeAgent); }
+}
+function askConfirmation(message, request) { pendingControl=request; document.querySelector('#confirm-message').textContent=message; document.querySelector('#confirm-action').showModal(); }
+document.querySelector('#apply-model').addEventListener('click',()=>{const value=document.querySelector('#model-select').value; if(value==='opus') askConfirmation('Opus tiene mayor costo. ¿Confirmas usarlo para las próximas órdenes?',()=>executeControl('model',value,true)); else executeControl('model',value);});
+document.querySelector('#apply-effort').addEventListener('click',()=>executeControl('effort',document.querySelector('#effort-select').value));
+document.querySelector('#compact-worker').addEventListener('click',()=>askConfirmation('Solicitar compactación ahora. Si el agente trabaja, se ejecutará antes de su próxima orden.',()=>executeControl('compact')));
+document.querySelector('#confirm-cancel').addEventListener('click',()=>{document.querySelector('#confirm-action').close();pendingControl=null;});
+document.querySelector('#confirm-accept').addEventListener('click',()=>{document.querySelector('#confirm-action').close();const run=pendingControl;pendingControl=null;run?.();});
+document.querySelector('#copy-compact').addEventListener('click',async()=>{const ok=await window.bridgeWidget.copyCompact();document.querySelector('#control-feedback').textContent=ok?'Copiado /compact':'No se pudo copiar';});
+document.querySelector('#new-events').addEventListener('click',()=>{document.querySelector('#detail-events').scrollTop=0;detailPinned=true;newEventCount=0;document.querySelector('#new-events').hidden=true;});
+function openDetail(name) { detailName = name; newestEventKey=''; newEventCount=0; document.querySelector('#detail-events').scrollTop=0; detailView.hidden = false; document.querySelector('#agents').hidden = true; detailPinned = true; refreshDetail(); clearInterval(detailTimer); detailTimer = setInterval(refreshDetail, 3000); reportLayout(); }
+function closeDetail() { detailName = null; activeAgent=null; clearInterval(detailTimer); detailView.hidden = true; document.querySelector('#agents').hidden = false; reportLayout(); }
 document.querySelector('#detail-back').addEventListener('click', closeDetail);
-document.querySelector('#detail-events').addEventListener('scroll', (event) => { const b=event.currentTarget; detailPinned=b.scrollHeight-b.scrollTop-b.clientHeight<30; });
+document.querySelector('#detail-events').addEventListener('scroll', (event) => { const b=event.currentTarget; detailPinned=b.scrollTop<30; if(detailPinned){newEventCount=0;document.querySelector('#new-events').hidden=true;} });
 window.bridgeWidget.onCaptureFeed(() => {
   const target = snapshot.data?.agents?.find(a => a.state === 'working') || snapshot.data?.agents?.[0];
   if (target && !detailName) openDetail(target.name);
