@@ -80,7 +80,7 @@ function metric({ label, used, resetsAt = null, context = false }) {
 }
 
 function agentCard(agent) {
-  const card = element('article', `agent${settings.compact ? ' compact' : ''}`);
+  const card = element('article', `agent${settings.compact ? ' compact' : ''}${agent.role === 'admin' ? ' agent-admin' : ''}`);
   const identity = element('div', 'identity');
   const identityMain = element('div', 'identity-main');
   const name = element('h2', 'agent-name', agent.name);
@@ -88,6 +88,7 @@ function agentCard(agent) {
   identityMain.append(name, element('span', `state state-${agent.state}`, states[agent.state]));
   identity.append(identityMain);
   const labels = element('div', 'identity-labels');
+  if (agent.role === 'admin') labels.append(element('span', 'badge badge-admin', 'Admin'));
   labels.append(element('span', 'badge', agent.kind));
   if (agent.context !== null && agent.context > 40) labels.append(element('span', 'badge badge-warning', 'Compactará'));
   if (agent.tier === 'skip') labels.append(element('span', 'badge badge-critical', 'Skip'));
@@ -265,6 +266,7 @@ async function refreshDetail() {
   if (!agent) return;
   activeAgent = agent;
   document.querySelector('#detail-title').textContent = agent.name;
+  detailView.classList.toggle('detail-admin', agent.role === 'admin');
   configureControls(agent);
   const status = document.querySelector('#detail-status');
   const age = data.state.since ? Math.max(0, Math.floor(Date.now()/1000-data.state.since)) : 0;

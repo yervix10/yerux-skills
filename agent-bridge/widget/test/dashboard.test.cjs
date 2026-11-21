@@ -2,10 +2,24 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
 const { parseDashboard } = require('../src/dashboard.cjs');
 const { formatCountdown, usageColor, sortAgents, normalizeSettings, partitionAgents, visibleMetrics, highestUsage } = require('../src/metrics.js');
 
 const usage = { used: null, resets_at: null };
+
+test('define acento violeta admin coherente y variantes de vista compacta/detalle', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
+  const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
+  assert.match(css, /\.agent-admin[\s\S]*?box-shadow: inset 3px 0 0 var\(--admin-accent\)/);
+  assert.match(css, /\.compact\.agent-admin \.identity-labels \{ display: flex; \}/);
+  assert.match(css, /@media \(prefers-color-scheme: light\)[\s\S]*?--admin-accent: #5634ae/);
+  assert.match(css, /\.detail-admin \.feed-admin[\s\S]*?--admin-accent/);
+  assert.match(renderer, /agent\.role === 'admin' \? ' agent-admin'/);
+  assert.match(renderer, /detailView\.classList\.toggle\('detail-admin', agent\.role === 'admin'\)/);
+});
+
 const agent = {
   name: 'codex-1', role: 'worker', kind: 'codex', state: 'working',
   detail: '', model: 'gpt', effort: '', set_model: '', set_effort: 'medium',

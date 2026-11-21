@@ -44,6 +44,12 @@
   }
 }
 
+/* Admin violet stays distinct from worker and status colors in both themes. */
+.agent-admin, .detail-admin { --admin-accent: #b9a0ff; }
+@media (prefers-color-scheme: light) {
+  .agent-admin, .detail-admin { --admin-accent: #5634ae; }
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -158,6 +164,17 @@ main::-webkit-scrollbar-track { background: transparent; }
   border-radius: 13px;
   transition: background-color .18s ease, border-color .18s ease, transform .18s ease;
 }
+.agent-admin {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--admin-accent) 72%, var(--border));
+  background: linear-gradient(115deg, color-mix(in srgb, var(--admin-accent) 17%, var(--card)), var(--card) 68%);
+  box-shadow: inset 3px 0 0 var(--admin-accent), 0 0 16px color-mix(in srgb, var(--admin-accent) 12%, transparent);
+}
+.agent-admin:hover { border-color: color-mix(in srgb, var(--admin-accent) 82%, var(--border)); background: linear-gradient(115deg, color-mix(in srgb, var(--admin-accent) 23%, var(--card-hover)), var(--card-hover) 68%); }
+.agent-admin .state-admin, .agent-admin .badge-admin { color: var(--admin-accent); }
+.agent-admin .badge-admin { background: color-mix(in srgb, var(--admin-accent) 13%, var(--card)); border-color: color-mix(in srgb, var(--admin-accent) 42%, var(--border)); }
 .agent:hover { background: var(--card-hover); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
 .identity, .identity-main, .identity-labels, .metadata { display: flex; align-items: center; min-width: 0; }
 .identity { justify-content: space-between; gap: 8px; }
@@ -255,6 +272,7 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .compact { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 9px; }
 .compact .identity { min-width: 0; }
 .compact .identity-labels { display: none; }
+.compact.agent-admin .identity-labels { display: flex; }
 .compact .identity-main { min-width: 0; }
 .compact .agent-name { max-width: 140px; }
 .compact .state { margin-inline-start: auto; }
@@ -286,6 +304,8 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .feed-day { align-self: center; margin: 3px 0; padding: 3px 9px; color: var(--muted); background: var(--badge); border-radius: 999px; font-size: 9px; }
 .feed-message { max-width: 94%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 13px; background: var(--card); overflow-wrap: anywhere; }
 .feed-admin { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--card)); border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); border-bottom-right-radius: 4px; }
+.detail-admin #detail-title, .detail-admin .feed-admin .feed-byline { color: var(--admin-accent); }
+.detail-admin .feed-admin { background: linear-gradient(120deg, color-mix(in srgb, var(--admin-accent) 20%, var(--card)), color-mix(in srgb, var(--admin-accent) 9%, var(--card))); border-color: color-mix(in srgb, var(--admin-accent) 58%, var(--border)); box-shadow: inset 2px 0 0 var(--admin-accent); }
 .feed-user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 14%, var(--card)); border-bottom-right-radius: 4px; }
 .feed-assistant { align-self: flex-start; background: color-mix(in srgb, var(--tier-light) 9%, var(--card)); border-bottom-left-radius: 4px; }
 .feed-report { align-self: flex-start; background: color-mix(in srgb, var(--tier-heavy) 9%, var(--card)); border-bottom-left-radius: 4px; }
