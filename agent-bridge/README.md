@@ -22,7 +22,7 @@ The agent detail panel renders safe lightweight Markdown, code blocks with copy 
     ./install.sh             # install
     ./install.sh --uninstall
 
-Kiro CLI is detected from `kiro-cli` plus `~/.kiro` (or an existing session store). It receives the automatic name `kiro-N`; `./install.sh --kiro-dir DIR` can select another config directory. Instructions and the skill are installed as `steering/AGENTS.md` and `steering/agent-bridge.md`; Kiro supports global steering in `~/.kiro/steering/`. The runner uses `kiro-cli chat --no-interactive --trust-all-tools --trust-workspace`, `--resume-id` for the saved per-worktree session, and a handoff summary when context compaction is needed. Set `BRIDGE_BYPASS=0` (or `--safe`) to restrict tool trust.
+Kiro CLI is detected from `kiro-cli` plus `~/.kiro` (or an existing session store). It receives the automatic name `kiro-N`; `./install.sh --kiro-dir DIR` can select another config directory. Instructions and the skill are installed as `steering/AGENTS.md` and `steering/agent-bridge.md`; Kiro supports global steering in `~/.kiro/steering/`. The runner uses `kiro-cli chat --no-interactive --trust-all-tools --trust-workspace`, `--resume-id` for the saved per-worktree session, and a handoff summary when context compaction is needed. It joins all streamed assistant fragments across tool calls into one complete reply and tells Kiro not to send its own bridge message; the runner sends exactly one reply. Set `BRIDGE_BYPASS=0` (or `--safe`) to restrict tool trust.
 
 ## Headless workers
 

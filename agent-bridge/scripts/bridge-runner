@@ -183,6 +183,9 @@ while true; do
 
 Order:
 $body"
+  if [ "$kind" = kiro ]; then prompt="$prompt
+
+Do not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text."; fi
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
   if [ -n "$mdl" ]; then case "$kind" in claude|kiro) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; esac; fi
@@ -221,7 +224,7 @@ $body"
     ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" kiro-cli chat --no-interactive --trust-workspace "${trust_args[@]}" --output-format stream-json "${MODEL_ARGS[@]}" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     status="$(jq -r 'select(.type=="runFinished")|.data.status // empty' "$LIVE" 2>/dev/null | tail -1)"
     { [ -n "$status" ] && [ "$status" != success ]; } && [ "$rc" = 0 ] && rc=1
-    jq -r 'select(.type=="runFinished")|.data.finalText // empty' "$LIVE" 2>/dev/null | tail -1 > "$tmp"
+    "$(dirname "$0")/bridge-kiro-response" "$LIVE" > "$tmp"
     [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
     id="$( (cd "$cwd" && kiro-cli chat --list-sessions --format json 2>/dev/null) | jq -r '[..|objects|select(.sessionId? and .updatedAt?)]|sort_by(.updatedAt)|last.sessionId // empty' 2>/dev/null)"
     [ -n "$id" ] || id="$(jq -r 'select(.type=="sessionUpdate")|.data.sessionId // empty' "$LIVE" 2>/dev/null | tail -1)"

@@ -35,11 +35,15 @@ if [[ "$*" != *"--list-models"* && "$*" != *"--list-sessions"* ]]; then echo "$*
 if [[ "$*" == *"--list-models"* ]]; then echo '{"models":[{"model_id":"auto"},{"model_id":"claude-sonnet-4.5"}]}'; exit 0; fi
 if [[ "$*" == *"--list-sessions"* ]]; then printf '[{"cwd":"%s","sessions":[{"sessionId":"sess-kiro-test","updatedAt":"2026-11-21T20:00:00Z"}]}]\n' "$PWD"; exit 0; fi
 [[ "$*" == *"--resume-id sess-kiro-test"* ]] && echo resumed >> "$KIRO_TEST_HOME/resumed.log"
-echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}'
-echo '{"type":"runFinished","data":{"sessionId":"sess-kiro-test","status":"success","finalText":"ok"}}'
+echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Primera parte.\n"}}}}'
+echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"tool_call","toolCall":{"name":"fs_read","title":"Read file"}}}}'
+echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"..."}}}}'
+echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Segunda parte."}}}}'
+echo '{"type":"runFinished","data":{"sessionId":"sess-kiro-test","status":"success","finalText":"Primera parte.\\nSegunda parte."}}'
 EOF
 chmod +x "$T/bin/claude" "$T/bin/codex"
 chmod +x "$T/bin/kiro-cli"
+chmod +x "$S/bridge-kiro-response"
 pass=0; fail=0
 check() { if [ "$2" = "$3" ] || { [ "${3:0:1}" = "~" ] && [[ "$2" == *"${3:1}"* ]]; }; then pass=$((pass+1)); echo "  ok   $1"; else fail=$((fail+1)); echo "  FAIL $1: got [$2] expected [$3]"; fi; }
 send() { printf 'From: adm\nTo: w1\nDate: x\nCwd: %s\n\n%s\n' "${2:-/tmp}" "$1" > "$T/b/inbox/w1/$(date +%s%N)-de-adm.msg"; }
@@ -167,13 +171,18 @@ check "dashboard --once prints plain text" "$("$S/agent" dashboard --once | grep
 check "dashboard --once lists every agent" "$("$S/agent" dashboard --once | grep -c '^w[12] ')" "2"
 
 echo "Kiro provider via copied scripts and an isolated bridge directory"
+check "Kiro response helper joins anonymized multipart fixture" "$("$S/bridge-kiro-response" "$ROOT/agent-bridge/widget/test/fixtures/kiro-multipart-anonymized.jsonl")" "1. Primera observación completa.
+2. Segunda observación.
+3. Tercera observación."
 check "provider resolver detects Kiro config prefix" "$("$S/bridge-provider" kiro-1)" "kiro"
 check "Kiro tier defaults to normal without account quota data" "$("$S/bridge-capacity" --tier kiro-1)" "normal"
 check "Kiro model is checked against CLI model list" "$(BRIDGE_NAME=adm "$S/agent" model kiro-1 claude-sonnet-4.5)" "kiro-1: model set to claude-sonnet-4.5 (applies from its next order)"
 BRIDGE_NAME=adm "$S/agent" effort kiro-1 high >/dev/null
 base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start kiro-1
 printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: /tmp\n\nresponde solo: ok\n' > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1));
-check "Kiro runner returns final stream-json response" "$(last_msg)" "ok"
+check "Kiro runner returns every multipart text fragment" "$(last_msg)" "Primera parte.
+Segunda parte."
+check "Kiro prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.args")" "1"
 check "Kiro saves list-sessions id for next order" "$(cat "$T/b/sessions/kiro-1/$(find "$T/b/sessions/kiro-1" -maxdepth 1 -type f ! -name '*.cwd' -printf '%f\n' | head -1)" 2>/dev/null)" "sess-kiro-test"
 printf 'From: adm\nTo: kiro-1\nDate: x\nCwd: /tmp\n\nsecond order\n' > "$T/b/inbox/kiro-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2)); stop
 check "Kiro resumes by its saved session id" "$(cat "$T/home/.kiro-fake/resumed.log" 2>/dev/null | wc -l | tr -d ' ')" "1"

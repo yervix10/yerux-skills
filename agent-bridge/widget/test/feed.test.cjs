@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { feed, parseClaude, parseAdminClaude, parseCodex, parseKiro, redact, tail, tailUseful, selectEvents } = require('../../scripts/bridge-feed');
 const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
 test('parsea mensajes Claude, herramienta y resultado', () => {
@@ -29,6 +30,12 @@ test('parsea órdenes, texto, herramientas y respuesta final del stream Kiro', (
   assert.equal(events[0].text, 'Responde solo: ok');
   assert.equal(events[2].tool, 'Read file');
   assert.equal(events.at(-1).text, 'ok');
+});
+test('reconstruye respuesta multipart Kiro completa y descarta solo el fragmento ellipsis', () => {
+  const fixture = path.join(__dirname, 'fixtures/kiro-multipart-anonymized.jsonl');
+  const helper = path.join(__dirname, '../../scripts/bridge-kiro-response');
+  const reply = execFileSync(helper, [fixture], { encoding: 'utf8' });
+  assert.equal(reply, '1. Primera observación completa.\n2. Segunda observación.\n3. Tercera observación.');
 });
 test('lee transcript anonimizado del admin y clasifica órdenes, reportes, conversación y ping', () => {
   const fixture = path.join(__dirname, 'fixtures/admin-transcript-anonymized.jsonl');
