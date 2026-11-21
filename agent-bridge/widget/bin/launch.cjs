@@ -18,9 +18,15 @@ async function launch() {
   const executable = require('electron');
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  const waylandSession = env.XDG_SESSION_TYPE === 'wayland' || Boolean(env.WAYLAND_DISPLAY);
+  const useX11 = process.platform === 'linux' && env.BRIDGE_WIDGET_WAYLAND !== '1' &&
+    Boolean(env.DISPLAY) && (env.BRIDGE_WIDGET_X11 === '1' || waylandSession);
+  if (useX11) env.BRIDGE_WIDGET_X11 = '1';
+  const graphicsArgs = useX11
+    ? ['--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader'] : [];
 
   if (action === 'start') {
-    const child = spawn(executable, [root, '--widget-start'], {
+    const child = spawn(executable, [...graphicsArgs, root, '--widget-start'], {
       cwd: root,
       env,
       detached: true,

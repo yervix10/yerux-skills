@@ -33,7 +33,11 @@ app.commandLine.appendSwitch('disk-cache-size', '1048576');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128');
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-  if (process.env.BRIDGE_WIDGET_X11 === '1') app.commandLine.appendSwitch('ozone-platform', 'x11');
+  if (process.env.BRIDGE_WIDGET_X11 === '1') {
+    app.commandLine.appendSwitch('ozone-platform', 'x11');
+    app.commandLine.appendSwitch('use-gl', 'angle');
+    app.commandLine.appendSwitch('use-angle', 'swiftshader');
+  }
 }
 
 function readSettings() {
@@ -201,7 +205,7 @@ async function createWidget() {
     title: 'Agent Bridge',
     skipTaskbar: !settings.showInTaskbar,
     ...(process.platform === 'win32' ? { type: 'toolbar' } : {}),
-    ...(process.platform === 'linux' ? { type: process.env.BRIDGE_WIDGET_X11 === '1' ? 'toolbar' : 'utility' } : {}),
+    ...(process.platform === 'linux' ? { type: process.env.BRIDGE_WIDGET_X11 === '1' ? 'dock' : 'utility' } : {}),
     // Wayland requires a resizable surface for the compositor to accept smaller dimensions.
     resizable: process.platform === 'linux',
     movable: true,
