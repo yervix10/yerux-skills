@@ -15,6 +15,9 @@ const list = document.querySelector('#agents');
 const adminList = document.querySelector('#admins');
 const workingGroup = { section: document.querySelector('#group-working'), button: document.querySelector('#toggle-working'), count: document.querySelector('#count-working'), list: document.querySelector('#list-working') };
 const freeGroup = { section: document.querySelector('#group-free'), button: document.querySelector('#toggle-free'), count: document.querySelector('#count-free'), list: document.querySelector('#list-free') };
+const detailView = document.querySelector('#detail-view');
+let detailName = null; let detailTimer = null; let detailPinned = true; let detailScroll;
+let captureFeed = false;
 
 const states = {
   admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
@@ -225,6 +228,7 @@ function render() {
         card.replaceChildren(...fresh.childNodes);
         agentFingerprints.set(agent.name, fingerprint);
       }
+      card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-label', `Ver actividad de ${agent.name}`);
       target.append(card);
     }
   }
@@ -245,8 +249,36 @@ function render() {
   } else empty?.remove();
   content.scrollTop = scroll;
   updateClock();
-  reportLayout(!!data);
+  reportLayout(!!data && (!captureFeed || !!detailName));
 }
+
+async function refreshDetail() {
+  if (!detailName || detailView.hidden) return;
+  const data = await window.bridgeWidget.readFeed(detailName);
+  if (!data || detailName !== data.name) return;
+  const status = document.querySelector('#detail-status');
+  const age = data.state.since ? Math.max(0, Math.floor(Date.now()/1000-data.state.since)) : 0;
+  status.textContent = data.state.status === 'working' ? `Trabajando hace ${age >= 60 ? `${Math.floor(age/60)} min` : `${age} s`} · ahora: ${data.state.activity || '…'}` : `Estado: ${data.state.status}`;
+  const box = document.querySelector('#detail-events'); const wasBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  box.replaceChildren();
+  for (const event of data.events) {
+    const row = element('div', `feed-${event.role}`);
+    row.append(element('small', '', `${new Date(event.ts).toLocaleTimeString('es')} · ${event.role === 'order' ? 'Orden del admin' : event.role === 'tool' ? 'Herramienta' : event.role === 'result' ? 'Resultado' : event.role === 'system' ? 'Sistema' : 'Agente'}`));
+    row.append(element('div', event.role === 'tool' ? 'feed-tool' : '', event.role === 'tool' ? `${event.tool || 'acción'}  ${event.text}` : event.text)); box.append(row);
+  }
+  if (detailPinned && wasBottom) box.scrollTop = box.scrollHeight;
+  if (captureFeed) reportLayout(true);
+}
+function openDetail(name) { detailName = name; detailView.hidden = false; document.querySelector('#agents').hidden = true; detailPinned = true; refreshDetail(); clearInterval(detailTimer); detailTimer = setInterval(refreshDetail, 3000); reportLayout(); }
+function closeDetail() { detailName = null; clearInterval(detailTimer); detailView.hidden = true; document.querySelector('#agents').hidden = false; reportLayout(); }
+document.querySelector('#detail-back').addEventListener('click', closeDetail);
+document.querySelector('#detail-events').addEventListener('scroll', (event) => { const b=event.currentTarget; detailPinned=b.scrollHeight-b.scrollTop-b.clientHeight<30; });
+window.bridgeWidget.onCaptureFeed(() => {
+  const target = snapshot.data?.agents?.find(a => a.state === 'working') || snapshot.data?.agents?.[0];
+  if (target && !detailName) openDetail(target.name);
+});
+list.addEventListener('click', (event) => { const card=event.target.closest('[data-agent-name]'); if(card) openDetail(card.dataset.agentName); });
+list.addEventListener('keydown', (event) => { const card=event.target.closest('[data-agent-name]'); if(card && (event.key==='Enter'||event.key===' ')){event.preventDefault();openDetail(card.dataset.agentName);} });
 
 function applyCollapsed() {
   panel.classList.toggle('collapsed', collapsed);
@@ -282,13 +314,22 @@ setInterval(updateClock, 1000);
 window.bridgeWidget.onUpdate((next) => {
   snapshot = next;
   render();
+  if (captureFeed && !detailName) {
+    const target = snapshot.data?.agents?.find(a => a.state === 'working') || snapshot.data?.agents?.[0];
+    if (target) openDetail(target.name);
+  }
 });
 window.bridgeWidget.initial().then((initial) => {
+  captureFeed = initial.captureFeed === true;
   if (snapshot.data === null && !snapshot.disconnected) snapshot = initial.snapshot;
   collapsed = initial.collapsed;
   settings = normalizeSettings(initial.settings || settings);
   applySettings();
   applyCollapsed();
+  if (captureFeed) {
+    const target = initial.snapshot.data?.agents?.find(a => a.state === 'working') || initial.snapshot.data?.agents?.[0];
+    if (target) openDetail(target.name);
+  }
 });
 
 function applySettings() {

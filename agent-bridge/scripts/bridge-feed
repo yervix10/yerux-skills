@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+
+const trunc = (s) => redact(String(s || '')).slice(0, 2000);
+function cleanOrder(value) {
+  let text = String(value || '').trim();
+  const marker = /(?:^|\n)Order:\s*\n/;
+  const found = text.match(marker);
+  if (found) text = text.slice(found.index + found[0].length).trim();
+  if (/^#\s*AGENTS\.md instructions\b/i.test(text)) {
+    const end = text.search(/<environment_context>/i);
+    const close = text.search(/<\/environment_context>/i);
+    if (end >= 0 && close >= end) text = text.slice(close + '</environment_context>'.length).trim();
+    else return '';
+  }
+  if (/^<environment_context>/i.test(text)) {
+    const close = text.search(/<\/environment_context>/i);
+    if (close < 0) return '';
+    text = text.slice(close + '</environment_context>'.length).trim();
+  }
+  if (/^Order:\s*$/m.test(text)) text = text.replace(/^Order:\s*$/m, '').trim();
+  if (!text || /^#\s*AGENTS\.md instructions\b/i.test(text)) return '';
+  return text;
+}
+function redact(s) {
+  return s.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED KEY]')
+    .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]').replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,})\b/g, '[REDACTED TOKEN]')
+    .replace(/\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*)\s*=\s*[^\s,;]+/gi, '$1=[REDACTED]');
+}
+function parseClaude(line) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const m = o.message || {}; const content = m.content;
+  const ts = o.timestamp || m.timestamp || new Date().toISOString(); const out = [];
+  if (o.type === 'user' || o.type === 'human') {
+    const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(x => x.type === 'text').map(x => x.text).join('\n') : '';
+    const order = cleanOrder(text);
+    if (order) out.push({ ts, role: 'order', text: trunc(order) });
+  } else if (o.type === 'assistant') {
+    for (const c of (Array.isArray(content) ? content : [])) {
+      if (c.type === 'text' && c.text) out.push({ ts, role: 'assistant', text: trunc(c.text) });
+      if (c.type === 'tool_use') out.push({ ts, role: 'tool', tool: trunc(c.name), text: trunc(JSON.stringify(c.input || {})) });
+    }
+  } else if (o.type === 'result') out.push({ ts, role: 'result', text: trunc(o.result || '') });
+  return out;
+}
+function parseCodex(line) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const ts = o.timestamp || o.payload?.timestamp || new Date().toISOString(); const p = o.payload || {}; const out = [];
+  if (o.type === 'response_item') {
+    if (p.type === 'message') {
+      if (p.role !== 'user' && p.role !== 'assistant') return out;
+      const text = (p.content || []).map(c => c.text || '').filter(Boolean).join('\n');
+      if (p.role === 'user') { const order = cleanOrder(text); if (order) out.push({ ts, role: 'order', text: trunc(order) }); }
+      else if (text) out.push({ ts, role: 'assistant', text: trunc(text) });
+    } else if (p.type === 'function_call' || p.type === 'custom_tool_call') out.push({ ts, role: 'tool', tool: trunc(p.name || p.type), text: trunc(p.arguments || p.input || '') });
+    else if (p.type === 'custom_tool_call_output') out.push({ ts, role: 'tool', tool: trunc(p.name || 'resultado herramienta'), text: trunc(p.output || '') });
+  } else if (o.type === 'event_msg' && ['task_started','task_complete'].includes(p.type)) out.push({ ts, role: p.type === 'task_started' ? 'system' : 'result', text: trunc(p.message || (p.type === 'task_started' ? 'Tarea iniciada' : 'Tarea completada')) });
+  return out;
+}
+function tail(file, maxBytes = 1_000_000) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r'); const size = fs.fstatSync(fd).size; const start = Math.max(0, size - maxBytes); const len = size - start;
+    const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, start); let text = b.toString('utf8');
+    if (start > 0) text = text.slice(text.indexOf('\n') + 1);
+    const complete = text.lastIndexOf('\n');
+    if (complete < 0) return [];
+    return text.slice(0, complete).split('\n').filter(Boolean);
+  } catch { return []; } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+function selectEvents(events, opts = {}) {
+  const since = opts.since ? Date.parse(opts.since) : 0;
+  const limit = Number.isSafeInteger(Number(opts.limit)) && Number(opts.limit) > 0 ? Number(opts.limit) : 60;
+  return events.filter(e => Date.parse(e.ts) >= since).sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts)).slice(-limit);
+}
+function feed(name, opts = {}) {
+  const root = process.env.BRIDGE_DIR || path.join(os.homedir(), '.claude-bridge');
+  const names = fs.readFileSync(path.join(root,'names.conf'),'utf8').split(/\r?\n/).map(x=>x.split('=')[1]).filter(Boolean);
+  if (!names.includes(name)) throw new Error('Agente desconocido');
+  const events=[]; const statePath=path.join(root,'runs',`${name}.state`); let state={};
+  try { for(const l of fs.readFileSync(statePath,'utf8').split(/\r?\n/)){const i=l.indexOf('=');if(i>0)state[l.slice(0,i)]=l.slice(i+1);} } catch {}
+  const map=path.join(root,'names.conf'); const config=fs.readFileSync(map,'utf8').split(/\r?\n/).find(x=>x.split('=')[1]===name)?.split('=')[0];
+  const readFiles=(dir, parser, identifiers=[]) => { if(!dir||!fs.existsSync(dir))return; const files=[]; const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(dir); files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs); const selected=identifiers.length?files.filter(f=>identifiers.some(id=>path.basename(f).includes(id))).slice(0,3):files.slice(0,3); for(const f of selected)for(const l of tail(f))events.push(...parser(l)); };
+  const sessions=path.join(root,'sessions',name); const ids=[];try{for(const f of fs.readdirSync(sessions).sort((a,b)=>fs.statSync(path.join(sessions,b)).mtimeMs-fs.statSync(path.join(sessions,a)).mtimeMs)){const id=fs.readFileSync(path.join(sessions,f),'utf8').trim();if(id)ids.push(id);}}catch{}
+  const kind=path.basename(config||'').startsWith('.codex')?'codex':'claude';
+  if(kind==='claude') { const files=[]; const projects=path.join(config||'', 'projects'); const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(projects); const chosen=ids.length?ids.map(id=>files.find(x=>path.basename(x).includes(id))).filter(Boolean):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1); for(const f of chosen)for(const l of tail(f))events.push(...parseClaude(l)); }
+  else { const homes=[...new Set([path.join(os.homedir(),'.codex'), ...fs.readdirSync(os.homedir()).filter(x=>x.startsWith('.codex')).map(x=>path.join(os.homedir(),x)),config||''])]; for(const h of homes)readFiles(path.join(h,'sessions'),parseCodex,ids); }
+  try { const log=tail(path.join(root,'logs',`${name}.log`),200000).slice(-80); for(const l of log){const m=l.match(/^\[([^\]]+)\] (.*)$/);if(m)events.push({ts:m[1],role:/order from/.test(m[2])?'order':'system',text:trunc(m[2])});} } catch {}
+  if(state.order) events.push({ts:new Date(Number(state.since||Date.now()/1000)*1000).toISOString(),role:'order',text:trunc(state.order)});
+  return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,opts)};
+}
+if(require.main===module){const [name,...args]=process.argv.slice(2);const limit=Number(args[args.indexOf('--limit')+1])||60;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
+module.exports={feed,parseClaude,parseCodex,redact,tail,selectEvents,cleanOrder};

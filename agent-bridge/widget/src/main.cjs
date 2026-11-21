@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { fetchDashboard } = require('./poll.cjs');
 const { normalizeGroupOpen } = require('./metrics.js');
@@ -14,7 +15,8 @@ const intervals = [5, 10, 30];
 const command = process.argv.includes('--widget-status') ? 'status'
   : process.argv.includes('--widget-stop') ? 'stop'
     : process.argv.includes('--widget-start') ? 'start' : 'show';
-const capture = process.argv.includes('--capture');
+const capture = process.argv.includes('--capture') || process.env.BRIDGE_CAPTURE === '1';
+const captureFeed = process.argv.includes('--capture-feed') || process.env.BRIDGE_CAPTURE_FEED === '1';
 const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency', groupOpen: { working: true, free: false } };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
 const appIcon = path.join(root, 'assets', 'agent-bridge.png');
@@ -257,7 +259,12 @@ async function createWidget() {
   const fromWidget = (event) => event.sender === window.webContents &&
     event.senderFrame === window.webContents.mainFrame;
   ipcMain.handle('dashboard:initial', (event) => {
-    if (fromWidget(event)) return { snapshot, collapsed: settings.collapsed, settings };
+    if (fromWidget(event)) return { snapshot, collapsed: settings.collapsed, settings, captureFeed };
+  });
+  ipcMain.handle('feed:read', (event, name) => {
+    if (!fromWidget(event) || typeof name !== 'string' || !snapshot.data?.agents?.some(a => a.name === name)) return null;
+    try { return JSON.parse(execFileSync(path.join(root, 'scripts', 'bridge-feed'), [name, '--json', '--limit', '60'], { encoding: 'utf8', timeout: 5000 })); }
+    catch { return { name, state: { status: 'unavailable' }, events: [] }; }
   });
   ipcMain.on('dashboard:visible', (event, visible) => {
     if (!fromWidget(event) || typeof visible !== 'boolean') return;
@@ -285,7 +292,7 @@ async function createWidget() {
       settings.collapsed = collapsed;
       saveSettings();
     }
-    if (capture && renderedData === true && snapshot.data && !snapshot.disconnected) captureWindow();
+    if (capture && !captureFeed && renderedData === true && snapshot.data && !snapshot.disconnected) captureWindow();
   });
 
   window.on('move', () => {
@@ -319,6 +326,14 @@ async function createWidget() {
   window.once('ready-to-show', showWindow);
   await window.loadFile(path.join(__dirname, 'index.html'));
   poll(true);
+  if (capture && captureFeed) {
+    setTimeout(() => {
+      if (window && !window.isDestroyed()) {
+        window.webContents.send('capture:feed');
+        setTimeout(captureWindow, 1500);
+      }
+    }, 2500).unref();
+  }
   if (capture) {
     const deadline = setTimeout(() => {
       if (!captureStarted) {

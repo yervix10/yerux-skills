@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('bridgeWidget', {
   initial: () => ipcRenderer.invoke('dashboard:initial'),
+  readFeed: (name) => ipcRenderer.invoke('feed:read', name),
+  onCaptureFeed: (callback) => ipcRenderer.on('capture:feed', () => callback()),
   onUpdate: (callback) => {
     ipcRenderer.on('dashboard:update', (_event, snapshot) => callback(snapshot));
   },

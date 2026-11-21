@@ -16,6 +16,7 @@ dashboard_tier() {
   echo "$tier"
 }
 case "$1" in
+  feed) shift; exec "$D/bridge-feed" "$@";;
   ping) [ -n "$2" ] || { echo "usage: agent ping <target>" >&2; exit 1; }
         "$D/bridge-send" "$2" "ping from $me ($(date +%T))" ;;
   admin) shift; exec "$D/admin" "$@";;
