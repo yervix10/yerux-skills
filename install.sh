@@ -3,12 +3,12 @@
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
-# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--no-path] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
+# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--no-path] [--no-trust] [--check] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]...
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
 DRY=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""
-YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
+YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
 tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#$HOME}";; *) printf '%s' "$1";; esac; }
@@ -19,7 +19,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # ---------- arguments ----------
 while [ $# -gt 0 ]; do case "$1" in
   --skills) [ -n "${2:-}" ] || die "--skills needs a list (a,b | all | none)"; SKILLS_ARG="$2"; shift;;
-  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --no-path) OPT_PATH=0;; --uninstall) MODE=uninstall;; --list) MODE=list;;
+  --dry-run) DRY=1;; --yes|-y) YES=1;; --no-bypass) OPT_BYPASS=0;; --no-path) OPT_PATH=0;; --no-trust) OPT_TRUST=0;; --uninstall) MODE=uninstall;; --list) MODE=list;; --check) MODE=check;;
   --name) [ -n "${2:-}" ] || die "--name needs DIR=NAME"; OVERS="$OVERS
 ${2%%=*}=${2#*=}"; shift;;
   --claude-dir) [ -n "${2:-}" ] || die "--claude-dir needs a path"; CLAUDE_LIST="$CLAUDE_LIST
@@ -134,36 +134,48 @@ can_ask() { [ "${TERM:-}" = dumb ] && return 1; [ -n "${AGENT_BRIDGE_TTY:-}" ] &
 ask() { printf '  %s%s%s %s' "$CYN" "$S_ARROW" "$RST" "$1" >&2; IFS= read -r REPLY <&3 || REPLY=""; }
 yn() { local def="$2" d="Y/n"; [ "$2" = 0 ] && d="y/N"; ask "$1 ${DIM}[$d]${RST} "; case "$REPLY" in [Yy]*) return 0;; [Nn]*) return 1;; *) [ "$def" = 1 ];; esac; }
 MS_L=(); MS_S=(); MS_ON=(); MS_F=(); MS_N=0; MS_CUR=0; MS_EXTRA=0; MS_CB=""
-MS_TOP=0; MS_DRAWN=0
+MS_TOP=0; MS_DRAWN=0; MS_BACK=0; MS_CAN_BACK=0
 ms_geom() { MS_ROWS="$(tput lines 2>/dev/null || echo 24)"; MS_COLS="$(tput cols 2>/dev/null || echo 80)"
   case "$MS_ROWS" in ''|*[!0-9]*) MS_ROWS=24;; esac; case "$MS_COLS" in ''|*[!0-9]*) MS_COLS=80;; esac
-  MS_VIS=$((MS_ROWS - 9)); [ $MS_VIS -lt 5 ] && MS_VIS=5; [ $MS_VIS -gt $MS_N ] && MS_VIS=$MS_N; return 0; }
+  MS_VIS=$((MS_ROWS - 15)); [ $MS_VIS -lt 5 ] && MS_VIS=5; [ $MS_VIS -gt $MS_N ] && MS_VIS=$MS_N; return 0; }
 ms_clamp() { [ $MS_CUR -lt $MS_TOP ] && MS_TOP=$MS_CUR; [ $MS_CUR -ge $((MS_TOP + MS_VIS)) ] && MS_TOP=$((MS_CUR - MS_VIS + 1)); [ $MS_TOP -lt 0 ] && MS_TOP=0; return 0; }
-ms_draw() { local i p m lab sub max end
+ms_draw() { local i p m plain lab pad max sub end lw=0 n sel=0
   ms_geom; ms_clamp; end=$((MS_TOP + MS_VIS)); [ $end -gt $MS_N ] && end=$MS_N; MS_DRAWN=0
+  i=0; while [ $i -lt $MS_N ]; do n=${#MS_L[$i]}; [ "${MS_F[$i]:-0}" = 1 ] && n=$((n+2)); [ $n -gt $lw ] && lw=$n
+    [ "${MS_ON[$i]}" = 1 ] && { [ $MS_ALL = 1 ] && [ $i = 0 ] || sel=$((sel+1)); }; i=$((i+1)); done
+  [ $lw -gt 30 ] && lw=30
   i=$MS_TOP; while [ $i -lt $end ]; do
     if [ "${MS_ON[$i]}" = 1 ]; then m="${GRN}${S_ON}${RST}"; else m="${GRY}${S_OFF}${RST}"; fi
-    if [ $i -eq $MS_CUR ]; then p="${CYN}${S_ARROW}${RST}"; lab="${BOLD}${MS_L[$i]}${RST}"; else p=" "; lab="${MS_L[$i]}"; fi
-    max=$((MS_COLS - ${#MS_L[$i]} - 14)); sub="${MS_S[$i]}"
-    if [ "${MS_F[$i]:-0}" = 1 ]; then lab="${BOLD}${MAG}★ ${MS_L[$i]}${RST}  ${MAG}featured${RST}"; max=$((max - 10)); fi
-    if [ $max -lt 8 ]; then sub=""; else sub="${sub:0:$max}"; fi
-    printf '\033[2K\r  %s %s  %s  %s%s%s\n' "$p" "$m" "$lab" "$DIM" "$sub" "$RST"; MS_DRAWN=$((MS_DRAWN+1)); i=$((i+1)); done
-  if [ $MS_N -gt $MS_VIS ]; then printf '\033[2K\r  %s%d/%d%s\n' "$DIM" $((MS_CUR+1)) $MS_N "$RST"; MS_DRAWN=$((MS_DRAWN+1)); fi; }
+    plain="${MS_L[$i]}"; [ "${MS_F[$i]:-0}" = 1 ] && plain="★ $plain"
+    [ ${#plain} -gt $lw ] && plain="${plain:0:$((lw-1))}…"
+    pad=$((lw - ${#plain})); [ $pad -lt 0 ] && pad=0
+    lab="$plain"; [ "${MS_F[$i]:-0}" = 1 ] && lab="${MAG}${plain}${RST}"; [ $MS_ALL = 1 ] && [ $i = 0 ] && lab="${CYN}${plain}${RST}"
+    if [ $i -eq $MS_CUR ]; then p="${CYN}${S_ARROW}${RST}"; lab="${BOLD}${lab}${RST}"; else p=" "; fi
+    max=$((MS_COLS - lw - 12)); sub="${MS_S[$i]}"
+    if [ $max -lt 8 ]; then sub=""; elif [ ${#sub} -gt $max ]; then sub="${sub:0:$((max-1))}…"; fi
+    printf '\033[2K\r  %s %s  %s%*s  %s%s%s\n' "$p" "$m" "$lab" "$pad" "" "$DIM" "$sub" "$RST"; MS_DRAWN=$((MS_DRAWN+1)); i=$((i+1)); done
+  if [ $MS_ALL = 1 ] || [ $MS_N -gt $MS_VIS ]; then
+    printf '\033[2K\r\n\033[2K\r  %s%s%s%s selected%s   %s%d/%d%s\n' "$GRN" "$BOLD" "$sel" "$RST$DIM" "$RST" "$DIM" $((MS_CUR+1)) $MS_N "$RST"; MS_DRAWN=$((MS_DRAWN+2)); fi; }
+MS_ALL=0
+ms_allsync() { [ $MS_ALL = 1 ] || return 0; local i all=1 v
+  if [ $MS_CUR = 0 ]; then v="${MS_ON[0]}"; i=1; while [ $i -lt $MS_N ]; do MS_ON[$i]=$v; i=$((i+1)); done
+  else i=1; while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] || all=0; i=$((i+1)); done; MS_ON[0]=$all; fi; }
 ms_run() { local k rest first=1 i
-  MS_CUR=0; MS_TOP=0; MS_EXTRA=0; MS_DRAWN=0; ui_cursor_off
+  MS_CUR=0; MS_TOP=0; MS_EXTRA=0; MS_DRAWN=0; MS_BACK=0; ui_cursor_off
   while :; do
     if [ $first = 0 ] && [ $((MS_DRAWN + MS_EXTRA)) -gt 0 ]; then printf '\033[%dA\033[J' $((MS_DRAWN + MS_EXTRA)); fi
     first=0; MS_EXTRA=0; ms_draw
     IFS= read -rsn1 -u 3 k || k=""
     case "$k" in
       "") break;;
-      " ") [ $MS_N -gt 0 ] && { [ "${MS_ON[$MS_CUR]}" = 1 ] && MS_ON[$MS_CUR]=0 || MS_ON[$MS_CUR]=1; };;
+      " ") [ $MS_N -gt 0 ] && { [ "${MS_ON[$MS_CUR]}" = 1 ] && MS_ON[$MS_CUR]=0 || MS_ON[$MS_CUR]=1; ms_allsync; };;
       $'\033') IFS= read -rsn2 -t 1 -u 3 rest || rest=""
         case "$rest" in "[A") [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));; "[B") [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));; esac;;
       k|K) [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));;
       j|J) [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));;
+      b|B) if [ $MS_CAN_BACK = 1 ]; then MS_BACK=1; break; fi;;
       a) i=0; while [ $i -lt $MS_N ]; do MS_ON[$i]=1; i=$((i+1)); done;;
-      n) i=0; while [ $i -lt $MS_N ]; do MS_ON[$i]=0; i=$((i+1)); done;;
+      n) i=0; while [ $i -lt $MS_N ]; do MS_ON[$i]=0; i=$((i+1)); done; ms_allsync;;
       *) [ -n "$MS_CB" ] && "$MS_CB" "$k";;
     esac
   done
@@ -180,10 +192,18 @@ acc_cb() { case "$1" in
        assign "$p" "$([ "$kind" = claude ] && echo agent || echo codex)"
        ACC_KIND[$MS_N]="$kind"; ACC_DIR[$MS_N]="$p"; MS_ON[$MS_N]=1; MS_F[$MS_N]=0; MS_N=$((MS_N+1)); acc_refresh; fi;;
   esac; }
+keys() { local o="" k; for k in "$@"; do o="$o${CYN}${BOLD}${k%% *}${RST} ${DIM}${k#* }${RST}   "; done; printf '  %s\n' "$o"; }
+stepper() { local cur="$1" i=0 o="" nm sep="${DIM}${B_H}${B_H}${RST}"
+  for nm in Packages Accounts agent-bridge Confirm; do i=$((i+1))
+    if [ $i -lt $cur ]; then o="$o${GRN}${S_OK} ${nm}${RST}"
+    elif [ $i -eq $cur ]; then o="$o${BOLD}${MAG}${S_ON} ${nm}${RST}"
+    else o="$o${GRY}${S_OFF} ${nm}${RST}"; fi
+    [ $i -lt 4 ] && o="$o $sep "; done
+  printf '  %s\n' "$o"; }
+menu_screen() { local n="$1"; shift; UI_FAST=1; ui_clear; ui_banner; stepper "$n"; echo; keys "$@"; echo; }
 run_menu() {
   exec 3< "$TTY"
-  local i d
-  # --- accounts ---
+  local i d step=1 back="b back"
   ACC_KIND=(); ACC_DIR=(); MS_L=(); MS_S=(); MS_ON=(); MS_F=(); MS_N=0
   while IFS= read -r d; do [ -n "$d" ] && { ACC_KIND[$MS_N]=claude; ACC_DIR[$MS_N]="$d"; MS_ON[$MS_N]=1; MS_N=$((MS_N+1)); }; done <<EOF2
 $CLAUDE_LIST
@@ -192,27 +212,60 @@ EOF2
 $CODEX_LIST
 EOF2
   acc_refresh
-  ui_h "Accounts"; hint "↑↓ move · space select · r rename · + add folder · enter continue"; echo
-  MS_CB=acc_cb; ms_run; MS_CB=""
-  CLAUDE_LIST=""; CODEX_LIST=""; i=0
-  while [ $i -lt $MS_N ]; do
-    if [ "${MS_ON[$i]}" = 1 ]; then
-      if [ "${ACC_KIND[$i]}" = claude ]; then CLAUDE_LIST="$CLAUDE_LIST
+  ACC_N=$MS_N; ACC_ONS=("${MS_ON[@]}")
+  PK_ON=(); PK_L=("agent-bridge"); PK_S=("Claude Code + Codex sessions that talk to each other"); PK_ON[0]=1
+  i=0; while [ $i -lt ${#SK_NAMES[@]} ]; do PK_L[$((i+1))]="${SK_NAMES[$i]}"; PK_S[$((i+1))]="${SK_DESC[$i]}"; PK_ON[$((i+1))]=0; i=$((i+1)); done
+  OPT_ON=(1 1 1 1)
+  info_wait() { local k; ui_cursor_off; while :; do IFS= read -rsn1 -u 3 k || k=""; case "$k" in "") ui_cursor_on; return 0;; b|B) ui_cursor_on; MS_BACK=1; return 0;; e|E) if [ "${MS_EDITABLE:-0}" = 1 ]; then ui_cursor_on; MS_EDIT=1; return 0; fi;; esac; done; }
+  info_row() { printf '    %s%s%s  %s%-9s%s %s%-7s%s %s%s%s\n' "$GRN" "$S_OK" "$RST" "$BOLD" "$1" "$RST" "$BLU" "$2" "$RST" "$CYN" "$3" "$RST"; }
+  while :; do
+    case $step in
+    1) # --- packages (select) ---
+      MS_L=("all" "${PK_L[@]}"); MS_S=("select every package" "${PK_S[@]}"); MS_ON=(0 "${PK_ON[@]}"); MS_F=(0 1); MS_N=$((${#PK_L[@]}+1)); MS_ALL=1
+      i=1; MS_ON[0]=1; while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] || MS_ON[0]=0; i=$((i+1)); done
+      menu_screen 1 "↑↓ move" "space select" "a all" "n none" "enter continue"
+      MS_CAN_BACK=0; ms_run; MS_ALL=0
+      PK_ON=("${MS_ON[@]:1}"); PKG_AB="${MS_ON[1]}"; SEL_SKILLS=""; i=2
+      while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] && SEL_SKILLS="$SEL_SKILLS ${MS_L[$i]}"; i=$((i+1)); done
+      SEL_SKILLS="${SEL_SKILLS# }"
+      step=2;;
+    2) # --- accounts (info) ---
+      menu_screen 2 "e edit" "b back" "enter continue"; echo "  ${DIM}Detected accounts; all of them will be configured${RST}"; echo
+      CLAUDE_LIST=""; CODEX_LIST=""; i=0
+      while [ $i -lt $ACC_N ]; do
+        [ "${ACC_ONS[$i]}" = 1 ] || { i=$((i+1)); continue; }
+        info_row "$(get_name "${ACC_DIR[$i]}")" "${ACC_KIND[$i]}" "$(tilde "${ACC_DIR[$i]}")"
+        if [ "${ACC_KIND[$i]}" = claude ]; then CLAUDE_LIST="$CLAUDE_LIST
 ${ACC_DIR[$i]}"; else CODEX_LIST="$CODEX_LIST
-${ACC_DIR[$i]}"; fi; fi; i=$((i+1)); done
-  # --- packages ---
-  MS_L=("agent-bridge"); MS_S=("Claude Code + Codex sessions that talk to each other"); MS_ON=(1); MS_F=(1); MS_N=1
-  i=0; while [ $i -lt ${#SK_NAMES[@]} ]; do MS_L[$MS_N]="${SK_NAMES[$i]}"; MS_S[$MS_N]="${SK_DESC[$i]}"; MS_ON[$MS_N]=0; MS_F[$MS_N]=0; MS_N=$((MS_N+1)); i=$((i+1)); done
-  ui_h "Packages"; hint "↑↓ move · space select · a all · n none · enter continue"; echo
-  ms_run
-  PKG_AB="${MS_ON[0]}"; SEL_SKILLS=""; i=1
-  while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] && SEL_SKILLS="$SEL_SKILLS ${MS_L[$i]}"; i=$((i+1)); done
-  SEL_SKILLS="${SEL_SKILLS# }"
-  # --- agent-bridge options ---
-  if [ "$PKG_AB" = 1 ]; then ab_options_menu; fi
-  NACC=$(printf '%s\n%s\n' "$CLAUDE_LIST" "$CODEX_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
-  echo; ui_info "Accounts: $NACC   ·   agent-bridge: $([ "$PKG_AB" = 1 ] && echo yes || echo no)   ·   extra skills: $(printf '%s' "$SEL_SKILLS" | wc -w | tr -d ' ')"
-  yn "Proceed?" 1 || { echo "cancelled" >&2; exit 0; }
+${ACC_DIR[$i]}"; fi; i=$((i+1)); done
+      echo; MS_BACK=0; MS_EDIT=0; MS_EDITABLE=1; info_wait; MS_EDITABLE=0
+      [ $MS_BACK = 1 ] && { step=1; continue; }
+      if [ $MS_EDIT = 1 ]; then
+        MS_L=(); MS_S=(); MS_ON=("${ACC_ONS[@]}"); MS_F=(); MS_N=$ACC_N; acc_refresh
+        menu_screen 2 "↑↓ move" "space select" "r rename" "+ add folder" "enter done"
+        MS_CAN_BACK=0; MS_CB=acc_cb; ms_run; MS_CB=""; ACC_N=$MS_N; ACC_ONS=("${MS_ON[@]}"); continue; fi
+      if [ "$PKG_AB" = 1 ]; then step=3; else step=4; fi;;
+    3) # --- agent-bridge options (info) ---
+      menu_screen 3 "b back" "enter continue"; echo "  ${DIM}What agent-bridge will set up${RST}"; echo
+      for d in "Skill + /admin /agent commands|how sessions learn the commands" "Message hook|delivers messages between sessions" "Auto-approve Codex hooks|no /hooks review needed in Codex" "Headless workers in bypass mode|no permission prompts for orders" "Put agent/admin on PATH|~/.local/bin"; do
+        printf '    %s%s%s  %-34s %s%s%s\n' "$GRN" "$S_OK" "$RST" "${d%%|*}" "$DIM" "${d#*|}" "$RST"; done
+      echo; MS_BACK=0; info_wait
+      [ $MS_BACK = 1 ] && { step=2; continue; }
+      step=4;;
+    4) # --- confirm ---
+      local nc nx pk opts; nc=$(printf '%s\n' "$CLAUDE_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nx=$(printf '%s\n' "$CODEX_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
+      NACC=$((nc + nx)); pk="$SEL_SKILLS"; [ "$PKG_AB" = 1 ] && pk="agent-bridge $pk"; pk="$(printf '%s' "$pk" | sed 's/ *$//; s/ /, /g')"; [ -n "$pk" ] || pk="none"
+      local npk; npk=$(printf '%s' "$pk" | tr ',' '\n' | sed '/^ *$/d' | wc -l | tr -d ' '); [ ${#pk} -gt 58 ] && pk="${pk:0:55}…  ${DIM}($npk packages)${RST}"
+      menu_screen 4 "enter install" "n back"
+      opts="skill+commands, hook"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
+      sl=("${DIM}Accounts     ${RST}${BOLD}$NACC${RST}  ${DIM}($nc claude · $nx codex)${RST}" "${DIM}Packages     ${RST}$pk")
+      [ "$PKG_AB" = 1 ] && sl+=("${DIM}agent-bridge ${RST}$opts")
+      ui_box "Summary" "${sl[@]}"
+      yn "Install now?" 1 && break
+      if [ "$PKG_AB" = 1 ]; then step=3; else step=2; fi;;
+    esac
+  done
+  MS_CAN_BACK=0; UI_FAST=""; ui_clear; ui_banner
   exec 3<&-
 }
 [ "$MODE" = install ] && ui_banner
@@ -235,6 +288,23 @@ remove_skills() { local d="$1" n; [ -f "$MANIFEST" ] || return 0
   while IFS="	" read -r dir n; do [ "$dir" = "$d" ] && [ -n "$n" ] && { [ $DRY = 1 ] || rm -rf "$d/skills/$n"; say "  removed skill $n"; }; done < "$MANIFEST"
   if [ $DRY = 0 ]; then awk -F'	' -v d="$d" '$1 != d' "$MANIFEST" > "$MANIFEST.tmp"; mv "$MANIFEST.tmp" "$MANIFEST"; fi; return 0; }
 
+# ---------- check ----------
+if [ "$MODE" = check ]; then BAD=0
+  ok() { ui_okline "$1"; }; bad() { ui_failline "$1"; BAD=$((BAD+1)); }
+  ui_h "Check"
+  for s in agent admin bridge-hook bridge-runner bridge-send bridge-wait bridge-whoami; do
+    if [ -x "$BR/bin/$s" ]; then ok "script $s"; else bad "script $s missing or broken in $(tilde "$BR/bin")"; fi; done
+  chk_claude() { local d="$1" n; n="$(get_name "$d")"
+    if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/settings.json" >/dev/null 2>&1; then ok "Claude  $n  hook"; else bad "Claude  $n  hook missing ($(tilde "$d"))"; fi
+    if [ "$(jq -r '.env.BRIDGE_NAME // empty' "$d/settings.json" 2>/dev/null)" = "$n" ]; then ok "Claude  $n  name"; else bad "Claude  $n  BRIDGE_NAME not set"; fi
+    if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Claude  $n  skill up to date"; else bad "Claude  $n  skill missing or outdated"; fi; }
+  chk_codex() { local d="$1" n; n="$(get_name "$d")"
+    if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(contains("bridge-hook"))' "$d/hooks.json" >/dev/null 2>&1; then ok "Codex   $n  hook"; else bad "Codex   $n  hook missing ($(tilde "$d"))"; fi
+    if command -v python3 >/dev/null 2>&1 && command -v codex >/dev/null 2>&1; then
+      if out="$(python3 "$SRC/scripts/codex-trust-hooks" "$d" --check 2>&1)"; then ok "Codex   $n  hooks approved"; else bad "Codex   $n  $(printf '%s\n' "$out" | grep -c untrusted) hook(s) not approved: reinstall or run /hooks"; fi; fi
+    if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Codex   $n  skill up to date"; else bad "Codex   $n  skill missing or outdated"; fi; }
+  each "$CLAUDE_LIST" chk_claude; each "$CODEX_LIST" chk_codex
+  echo; if [ $BAD = 0 ]; then ui_info "everything looks fine"; else ui_warn "$BAD problem(s): run ./install.sh to repair"; exit 1; fi; exit 0; fi
 # ---------- uninstall ----------
 un_claude() { say "uninstalling Claude: $1"; ab_un_claude "$1"; remove_skills "$1"; }
 un_codex() { say "uninstalling Codex: $1"; ab_un_codex "$1"; remove_skills "$1"; }
@@ -244,11 +314,11 @@ if [ "$MODE" = uninstall ]; then each "$CLAUDE_LIST" un_claude; each "$CODEX_LIS
 # ---------- install ----------
 in_claude() { [ "$PKG_AB" = 1 ] && ab_install_claude "$1"; install_skills "$1"; return 0; }
 in_codex() { [ "$PKG_AB" = 1 ] && ab_install_codex "$1"; install_skills "$1"; return 0; }
-step_claude() { ui_run "Claude  $(get_name "$1")  ${DIM}$(tilde "$1")${RST}" in_claude "$1"; }
-step_codex() { ui_run "Codex   $(get_name "$1")  ${DIM}$(tilde "$1")${RST}" in_codex "$1"; }
+step_claude() { ui_run "${BOLD}Claude${RST}  ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_claude "$1"; }
+step_codex() { ui_run "${BOLD}Codex${RST}   ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_codex "$1"; }
 
 ui_h "Installing"
-if [ "$PKG_AB" != 1 ]; then :; elif [ $DRY = 1 ]; then say "  [dry-run] scripts -> $BR/bin"; else ui_run "Scripts  ${DIM}$(tilde "$BR/bin")${RST}" do_scripts; fi
+if [ "$PKG_AB" != 1 ]; then :; elif [ $DRY = 1 ]; then :; else ui_run "${BOLD}Scripts${RST}    ${CYN}$(tilde "$BR/bin")${RST}" do_scripts; fi
 if [ "$PKG_AB" = 1 ] && [ $OPT_PATH = 1 ] && [ $DRY = 0 ]; then ui_run "Commands on PATH  ${DIM}~/.local/bin${RST}" do_path; fi
 each "$CLAUDE_LIST" step_claude; each "$CODEX_LIST" step_codex
 NACC=$(printf '%s\n%s\n' "$CLAUDE_LIST" "$CODEX_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
@@ -257,6 +327,7 @@ if [ $DRY = 1 ]; then say; say "dry-run finished: nothing was written."; exit 0;
 lines=("${GRN}${S_OK}${RST} $NACC account(s) configured")
 [ "${UI_FAILS:-0}" -gt 0 ] && lines=("${RED}${S_FAIL}${RST} ${UI_FAILS} step(s) failed - see $UI_LOG")
 [ -n "$SEL_SKILLS" ] && lines+=("${GRN}${S_OK}${RST} skills: $SEL_SKILLS")
+for d in $CLAUDE_LIST $CODEX_LIST; do lines+=("  ${DIM}$(get_name "$d")  $(tilde "$d")${RST}"); done
 lines+=("" "${BOLD}Next steps${RST}" "  1. Restart open Claude/Codex sessions")
 [ "$PKG_AB" = 1 ] && ab_next_steps
 ui_box "Done" "${lines[@]}"

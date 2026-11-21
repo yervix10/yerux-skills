@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""codex-trust-hooks <CODEX_HOME>: pre-approves the agent-bridge hooks of a Codex account (what /hooks does by hand).
+Asks Codex's app-server for the hooks' keys and hashes and records them in <CODEX_HOME>/config.toml
+([hooks.state."<key>"] trusted_hash). Idempotent; exits 0 and writes nothing if codex is unavailable."""
+import json, os, re, select, shutil, subprocess, sys, threading, time, queue
+
+check = "--check" in sys.argv
+home = os.path.abspath([a for a in sys.argv[1:] if not a.startswith("--")][0])
+src = os.path.join(home, "hooks.json")
+if not os.path.isfile(src):
+    sys.exit(0)
+exe = shutil.which("codex")
+if not exe:
+    sys.exit(0)
+try:
+    p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, env=dict(os.environ, CODEX_HOME=home), cwd=home, text=True)
+except OSError:
+    sys.exit(0)
+
+def send(o):
+    p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+
+Q = queue.Queue()
+threading.Thread(target=lambda: [Q.put(l) for l in iter(p.stdout.readline, "")] + [Q.put(None)], daemon=True).start()
+
+def recv(i, t=20):
+    end = time.time() + t
+    while time.time() < end:
+        try:
+            l = Q.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        if l is None:
+            return None
+        try:
+            o = json.loads(l)
+        except ValueError:
+            continue
+        if o.get("id") == i:
+            return o
+    return None
+
+try:
+    send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "agent-bridge", "version": "1"}}}); recv(1)
+    send({"method": "initialized"})
+    send({"id": 2, "method": "hooks/list", "params": {"cwds": [home]}})
+    r = recv(2)
+finally:
+    p.kill()
+hooks = [h for d in ((r or {}).get("result", {}).get("data") or []) for h in d.get("hooks", [])
+         if h.get("sourcePath") == src and "bridge-hook" in (h.get("command") or "")]
+if not hooks:
+    sys.exit(1)
+
+if check:  # report only: exit 0 when every bridge hook is trusted
+    bad = [h for h in hooks if h.get("trustStatus") != "trusted"]
+    for h in bad:
+        print("untrusted: " + h["key"])
+    sys.exit(1 if bad else 0)
+
+cfg = os.path.join(home, "config.toml")
+text = open(cfg).read() if os.path.isfile(cfg) else ""
+for h in hooks:  # drop any previous state of these hooks, then append the current one
+    text = re.sub(r'\n*\[hooks\.state\."%s"\]\n(?:(?!\[)[^\n]*\n?)*' % re.escape(h["key"]), "\n", text)
+text = text.rstrip("\n")
+text = (text + "\n\n" if text else "") + "\n\n".join(
+    '[hooks.state."%s"]\ntrusted_hash = "%s"' % (h["key"], h["currentHash"]) for h in hooks) + "\n"
+open(cfg, "w").write(text)

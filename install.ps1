@@ -1,10 +1,10 @@
 # yerux-skills installer (Windows): finds every Claude Code / Codex account and installs the featured package
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge\package.ps1.
 # Interactive menu in a console; -Yes accepts everything detected.
-# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-NoPath] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
+# Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-NoPath] [-NoTrust] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\install.ps1
-param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Yes, [switch]$NoBypass, [switch]$NoPath, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
+param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Yes, [switch]$NoBypass, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -23,14 +23,20 @@ function Write-Text($p, $t) { [IO.File]::WriteAllText($p, $t, $utf8) }
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
 $UiUtf = ($PSVersionTable.PSVersion.Major -ge 6) -or [bool]$env:WT_SESSION -or ($env:TERM_PROGRAM -eq 'vscode')
 $UiColor = -not $env:NO_COLOR
-if ($UiUtf) { $S = @{ ok = [string][char]0x2714; fail = [string][char]0x2716; arrow = [string][char]0x276F; on = [string][char]0x25C9; off = [string][char]0x25CB; dot = [string][char]0x2022; tl = [string][char]0x256D; tr = [string][char]0x256E; bl = [string][char]0x2570; br = [string][char]0x256F; h = [string][char]0x2500; v = [string][char]0x2502; full = [string][char]0x2588; empty = [string][char]0x2591 } }
-else { $S = @{ ok = '+'; fail = 'x'; arrow = '>'; on = '(*)'; off = '( )'; dot = '*'; tl = '+'; tr = '+'; bl = '+'; br = '+'; h = '-'; v = '|'; full = '#'; empty = '.' } }
+if ($UiUtf) { $S = @{ ok = [string][char]0x2714; fail = [string][char]0x2716; arrow = [string][char]0x276F; on = [string][char]0x25C9; off = [string][char]0x25CB; dot = [string][char]0x2022; tl = [string][char]0x256D; tr = [string][char]0x256E; bl = [string][char]0x2570; br = [string][char]0x256F; h = [string][char]0x2500; v = [string][char]0x2502; dry = [string][char]0x25CC; full = [string][char]0x2588; empty = [string][char]0x2591 } }
+else { $S = @{ ok = '+'; fail = 'x'; arrow = '>'; on = '(*)'; off = '( )'; dot = '*'; tl = '+'; tr = '+'; bl = '+'; br = '+'; h = '-'; v = '|'; dry = '~'; full = '#'; empty = '.' } }
 function Ui-W($text, $color = 'Gray', [switch]$NoNewline) { if ($UiColor) { Write-Host $text -ForegroundColor $color -NoNewline:$NoNewline } else { Write-Host $text -NoNewline:$NoNewline } }
+function Ui-Box($title, $lines) {
+  $w = 54; Say ''; Ui-W ("  " + $S.tl + $S.h + " $title " + ($S.h * ($w - $title.Length - 3)) + $S.tr) 'Green'
+  foreach ($l in $lines) { Ui-W ("  " + $S.v + "  ") 'Green' -NoNewline; Say $l }
+  Ui-W ("  " + $S.bl + ($S.h * $w) + $S.br) 'Green'; Say '' }
+$script:Fast = $false
+function Ui-Sleep { if (-not $script:Fast) { Start-Sleep -Milliseconds 50 } }
 function Ui-Banner {
-  $w = 50; $t1 = '  yerux - skills  installer   v1.0.0'; $t2 = '  * featured: agent-bridge'
-  Say ''; Ui-W ("  " + $S.tl + ($S.h * $w) + $S.tr) 'Cyan'; Start-Sleep -Milliseconds 50
-  Ui-W ("  " + $S.v + $t1.PadRight($w) + $S.v) 'Cyan'; Start-Sleep -Milliseconds 50
-  Ui-W ("  " + $S.v + $t2.PadRight($w) + $S.v) 'DarkCyan'; Start-Sleep -Milliseconds 50
+  $w = 50; $t1 = '  yerux - skills  installer   v1.1.0'; $t2 = '  * featured: agent-bridge'
+  Say ''; Ui-W ("  " + $S.tl + ($S.h * $w) + $S.tr) 'Cyan'; Ui-Sleep
+  Ui-W ("  " + $S.v + $t1.PadRight($w) + $S.v) 'Cyan'; Ui-Sleep
+  Ui-W ("  " + $S.v + $t2.PadRight($w) + $S.v) 'DarkCyan'; Ui-Sleep
   Ui-W ("  " + $S.bl + ($S.h * $w) + $S.br) 'Blue'; Say '' }
 function Ui-H($t) { Say ''; Ui-W "  $t" 'Magenta' }
 function Ui-Info($t) { Ui-W "  $($S.dot) " 'Cyan' -NoNewline; Say $t }
@@ -45,7 +51,7 @@ function Ui-Bar { $filled = if ($script:Steps -gt 0) { [int](20 * $script:StepNo
   return ("[" + ($S.full * $filled) + ($S.empty * (20 - $filled)) + "] $($script:StepNo)/$($script:Steps)") }
 function Step($label, [scriptblock]$sb) {
   $script:StepNo++
-  if ($DryRun) { Say "  [dry-run] $label"; & $sb; return }
+  if ($DryRun) { Ui-W "  $($S.dry) $label" 'Yellow'; return }
   try { & $sb | Out-Null; Ui-Ok "$label"; Ui-W ("    " + (Ui-Bar)) 'DarkGray' }
   catch { $script:Fails++; Ui-Fail "$label"; Ui-W "      $($_.Exception.Message)" 'DarkGray' } }
 
@@ -136,73 +142,92 @@ $PkgAb = $true; $SelSkills = @()
 if ($Skills -eq 'all') { $SelSkills = @($SkList | ForEach-Object { $_.Name }) } elseif ($Skills -and $Skills -ne 'none') { $SelSkills = @($Skills -split '[,\s]+' | Where-Object { $_ }) }
 
 # ---------- interactive menu (arrows + space) ----------
-$optSkill = $true; $optHooks = $true; $optBypass = -not $NoBypass; $optPath = -not $NoPath
+$optSkill = $true; $optHooks = $true; $optBypass = -not $NoBypass; $optPath = -not $NoPath; $optTrust = -not $NoTrust
 function YN($q, $def) { $d = if ($def) { 'Y/n' } else { 'y/N' }; $r = Read-Host "  $($S.arrow) $q [$d]"; if ($r -match '^[Yy]') { return $true }; if ($r -match '^[Nn]') { return $false }; return $def }
 # Items: objects with Label, Sub, On, Feat. $onKey is an optional scriptblock called with the pressed char (may modify $items; returns extra lines it printed).
-function Ms-Run($items, [scriptblock]$onKey = $null) {
-  $cur = 0; $top = 0; $drawn = 0; $first = $true
+$script:MsBack = $false
+function Ms-Run($items, [scriptblock]$onKey = $null, [switch]$CanBack, [switch]$AllRow) {
+  $script:MsBack = $false; $cur = 0; $top = 0; $drawn = 0; $first = $true
   while ($true) {
-    $vis = [Math]::Max(5, [Console]::WindowHeight - 9); if ($vis -gt $items.Count) { $vis = $items.Count }
+    $vis = [Math]::Max(5, [Console]::WindowHeight - 15); if ($vis -gt $items.Count) { $vis = $items.Count }
     if ($cur -lt $top) { $top = $cur }; if ($cur -ge $top + $vis) { $top = $cur - $vis + 1 }; if ($top -lt 0) { $top = 0 }
     if (-not $first) { [Console]::SetCursorPosition(0, [Math]::Max(0, [Console]::CursorTop - $drawn)) }
     $first = $false; $cols = [Console]::WindowWidth; $drawn = 0
+    $lw = [Math]::Min(30, ($items | ForEach-Object { $_.Label.Length + $(if ($_.Feat) { 2 } else { 0 }) } | Measure-Object -Maximum).Maximum)
     for ($i = $top; $i -lt [Math]::Min($items.Count, $top + $vis); $i++) {
       $it = $items[$i]; $ptr = if ($i -eq $cur) { $S.arrow } else { ' ' }; $mark = if ($it.On) { $S.on } else { $S.off }
-      $lab = if ($it.Feat) { "* $($it.Label)  featured" } else { $it.Label }
-      $max = $cols - $lab.Length - 12; $sub = if ($max -lt 8) { '' } elseif ($it.Sub.Length -gt $max) { $it.Sub.Substring(0, $max) } else { $it.Sub }
+      $lab = if ($it.Feat) { "* $($it.Label)" } else { $it.Label }
+      if ($lab.Length -gt $lw) { $lab = $lab.Substring(0, $lw - 1) + '~' }; $lab = $lab.PadRight($lw)
+      $max = $cols - $lw - 12; $sub = if ($max -lt 8) { '' } elseif ($it.Sub.Length -gt $max) { $it.Sub.Substring(0, $max) } else { $it.Sub }
       Write-Host "  " -NoNewline; Ui-W $ptr 'Cyan' -NoNewline; Write-Host " " -NoNewline
       Ui-W $mark $(if ($it.On) { 'Green' } else { 'DarkGray' }) -NoNewline; Write-Host "  " -NoNewline
       Ui-W $lab $(if ($it.Feat) { 'Magenta' } else { 'White' }) -NoNewline; Ui-W ("  $sub").PadRight($cols - 8 - $lab.Length) 'DarkGray'
       $drawn++ }
-    if ($items.Count -gt $vis) { Ui-W ("  $($cur + 1)/$($items.Count)").PadRight($cols - 2) 'DarkGray'; $drawn++ }
+    if ($AllRow -or $items.Count -gt $vis) {
+      $sel = @($items | Where-Object { $_.On }).Count; if ($AllRow -and $items[0].On) { $sel-- }
+      Ui-W (' '.PadRight($cols - 2)) 'Gray'; Ui-W ("  $sel selected   $($cur + 1)/$($items.Count)").PadRight($cols - 2) 'DarkGray'; $drawn += 2 }
     $k = [Console]::ReadKey($true)
     switch ($k.Key) {
       'Enter' { return }
       'UpArrow' { if ($cur -gt 0) { $cur-- } }
       'DownArrow' { if ($cur -lt $items.Count - 1) { $cur++ } }
-      'Spacebar' { if ($items.Count -gt 0) { $items[$cur].On = -not $items[$cur].On } }
+      'Spacebar' { if ($items.Count -gt 0) {
+          $items[$cur].On = -not $items[$cur].On
+          if ($AllRow) {
+            if ($cur -eq 0) { for ($i = 1; $i -lt $items.Count; $i++) { $items[$i].On = $items[0].On } }
+            else { $items[0].On = -not ($items | Select-Object -Skip 1 | Where-Object { -not $_.On }) } } } }
       default {
         $ch = [string]$k.KeyChar
         if ($ch -eq 'k') { if ($cur -gt 0) { $cur-- } } elseif ($ch -eq 'j') { if ($cur -lt $items.Count - 1) { $cur++ } }
         elseif ($ch -eq 'a' -and -not $onKey) { foreach ($it in $items) { $it.On = $true } }
         elseif ($ch -eq 'n' -and -not $onKey) { foreach ($it in $items) { $it.On = $false } }
+        elseif (($ch -eq 'b' -or $ch -eq 'B') -and $CanBack) { $script:MsBack = $true; return }
         elseif ($onKey) { $extra = & $onKey $ch $items $cur; if ($extra) { $drawn += [int]$extra } } } } } }
 function Ui-Hint($t) { Ui-W "  $t" 'DarkGray' }
 
+function Ui-Stepper($cur) {
+  $names = 'Packages', 'Accounts', 'agent-bridge', 'Confirm'; Write-Host '  ' -NoNewline
+  for ($i = 1; $i -le 4; $i++) {
+    if ($i -lt $cur) { Ui-W "$($S.ok) $($names[$i - 1])" 'Green' -NoNewline } elseif ($i -eq $cur) { Ui-W "$($S.on) $($names[$i - 1])" 'Magenta' -NoNewline } else { Ui-W "$($S.off) $($names[$i - 1])" 'DarkGray' -NoNewline }
+    if ($i -lt 4) { Ui-W " $($S.h)$($S.h) " 'DarkGray' -NoNewline } }
+  Say '' }
+function Ui-Keys($keys) { Write-Host '  ' -NoNewline; foreach ($k in $keys) { $w, $r = $k -split ' ', 2; Ui-W $w 'Cyan' -NoNewline; Ui-W " $r   " 'DarkGray' -NoNewline }; Say '' }
+function Menu-Screen($n, $keys) { $script:Fast = $true; Clear-Host; Ui-Banner; Ui-Stepper $n; Say ''; Ui-Keys $keys; Say '' }
+function Info-Wait { while ($true) { $k = [Console]::ReadKey($true); if ($k.Key -eq 'Enter') { return $false }; if ($k.KeyChar -eq 'b' -or $k.KeyChar -eq 'B') { return $true } } }
 if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-  # --- accounts ---
-  $acc = New-Object System.Collections.ArrayList
-  foreach ($d in $Claude) { [void]$acc.Add([pscustomobject]@{ Kind = 'claude'; Dir = $d; Label = $Map[$d]; Sub = ''; On = $true; Feat = $false }) }
-  foreach ($d in $Codex) { [void]$acc.Add([pscustomobject]@{ Kind = 'codex'; Dir = $d; Label = $Map[$d]; Sub = ''; On = $true; Feat = $false }) }
-  function Acc-Refresh { foreach ($a in $acc) { $a.Label = $Map[$a.Dir]; $a.Sub = "$($a.Kind)   " + ($a.Dir -replace [regex]::Escape($UserHome), '~') } }
-  Acc-Refresh
-  Ui-H 'Accounts'; Ui-Hint 'up/down move | space select | r rename | + add folder | enter continue'; Say ''
-  $accKey = {
-    param($ch, $items, $cur)
-    if ($ch -eq 'r') {
-      $new = Read-Host "`n  $($S.arrow) new name for $($items[$cur].Label)"
-      if ($new -match '^[A-Za-z0-9_-]+$' -and -not ($Map.Keys | Where-Object { $_ -ne $items[$cur].Dir -and $Map[$_] -eq $new })) { $Map[$items[$cur].Dir] = $new; Acc-Refresh }
-      return 2 }
-    if ($ch -eq '+') {
-      $k = Read-Host "`n  $($S.arrow) type (claude/codex)"; $p = Norm (Read-Host "  $($S.arrow) folder")
-      if ($k -in 'claude', 'codex' -and $p -and (Test-Path $p -PathType Container)) {
-        Assign $p $(if ($k -eq 'claude') { 'agent' } else { 'codex' })
-        [void]$acc.Add([pscustomobject]@{ Kind = $k; Dir = $p; Label = ''; Sub = ''; On = $true; Feat = $false }); Acc-Refresh }
-      return 3 }
-    return 0 }
-  Ms-Run $acc $accKey
-  $Claude.Clear(); $Codex.Clear()
-  foreach ($a in $acc) { if ($a.On) { if ($a.Kind -eq 'claude') { $Claude.Add($a.Dir) } else { $Codex.Add($a.Dir) } } }
-  # --- packages ---
+  # accounts as detected (information only); packages are the only selectable step
+  $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }
   $pk = New-Object System.Collections.ArrayList
+  [void]$pk.Add([pscustomobject]@{ Label = 'all'; Sub = 'select every package'; On = $false; Feat = $false })
   [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex sessions that talk to each other'; On = $true; Feat = $true })
   foreach ($x in $SkList) { [void]$pk.Add([pscustomobject]@{ Label = $x.Name; Sub = $x.Desc; On = $false; Feat = $false }) }
-  Ui-H 'Packages'; Ui-Hint 'up/down move | space select | a all | n none | enter continue'; Say ''
-  Ms-Run $pk
-  $PkgAb = $pk[0].On; $SelSkills = @(); for ($i = 1; $i -lt $pk.Count; $i++) { if ($pk[$i].On) { $SelSkills += $pk[$i].Label } }
-  if ($PkgAb) { Ab-Options-Menu }
-  Say ''; Ui-Info "Accounts: $($Claude.Count + $Codex.Count)   |   agent-bridge: $(if ($PkgAb) { 'yes' } else { 'no' })   |   extra skills: $($SelSkills.Count)"
-  if (-not (YN 'Proceed?' $true)) { Say 'cancelled'; return } }
+  $step = 1
+  while ($true) {
+    if ($step -eq 1) {
+      $pk[0].On = -not ($pk | Select-Object -Skip 1 | Where-Object { -not $_.On })
+      Menu-Screen 1 @('up/down move', 'space select', 'a all', 'n none', 'enter continue')
+      Ms-Run $pk -AllRow
+      $PkgAb = $pk[1].On; $SelSkills = @(); for ($i = 2; $i -lt $pk.Count; $i++) { if ($pk[$i].On) { $SelSkills += $pk[$i].Label } }
+      $step = 2 }
+    elseif ($step -eq 2) {
+      Menu-Screen 2 @('b back', 'enter continue'); Ui-W '  Detected accounts; all of them will be configured' 'DarkGray'; Say ''
+      foreach ($a in $acc) { Write-Host '    ' -NoNewline; Ui-W "$($S.ok)  " 'Green' -NoNewline; Write-Host ("{0,-9} " -f $Map[$a.Dir]) -NoNewline; Ui-W ("{0,-7} " -f $a.Kind) 'Blue' -NoNewline; Ui-W ($a.Dir -replace [regex]::Escape($UserHome), '~') 'Cyan' }
+      Say ''; if (Info-Wait) { $step = 1 } elseif ($PkgAb) { $step = 3 } else { $step = 4 } }
+    elseif ($step -eq 3) {
+      Menu-Screen 3 @('b back', 'enter continue'); Ui-W '  What agent-bridge will set up' 'DarkGray'; Say ''
+      foreach ($l in @(@('Skill + /admin /agent commands', 'how sessions learn the commands'), @('Message hook', 'delivers messages between sessions'), @('Auto-approve Codex hooks', 'no /hooks review needed in Codex'), @('Headless workers in bypass mode', 'no permission prompts for orders'), @('Put agent/admin on PATH', 'user PATH'))) {
+        Write-Host '    ' -NoNewline; Ui-W "$($S.ok)  " 'Green' -NoNewline; Write-Host ("{0,-34} " -f $l[0]) -NoNewline; Ui-W $l[1] 'DarkGray' }
+      Say ''; if (Info-Wait) { $step = 2 } else { $step = 4 } }
+    else {
+      Menu-Screen 4 @('enter install', 'n back')
+      $pkn = @(); if ($PkgAb) { $pkn += 'agent-bridge' }; $pkn += $SelSkills; $pkt = if ($pkn.Count) { $pkn -join ', ' } else { 'none' }
+      if ($pkt.Length -gt 58) { $pkt = $pkt.Substring(0, 55) + "...  ($($pkn.Count) packages)" }
+      $sum = @("Accounts     $($Claude.Count + $Codex.Count)  ($($Claude.Count) claude / $($Codex.Count) codex)", "Packages     $pkt")
+      if ($PkgAb) { $sum += "agent-bridge skill+commands, hook" + $(if ($optTrust) { ', auto-approve Codex hooks' }) + $(if ($optBypass) { ', bypass workers' }) + $(if ($optPath) { ', PATH' }) }
+      Ui-Box 'Summary' $sum
+      if (YN 'Install now?' $true) { break }
+      if ($PkgAb) { $step = 3 } else { $step = 2 } } }
+  $script:Fast = $false; Clear-Host; Ui-Banner }
 
 # ---------- install ----------
 Ui-H 'Installing'
@@ -214,21 +239,17 @@ function Install-Skills($d) {
     Copy-Item $from $to -Recurse -Force; Remove-Item (Join-Path $to '.git') -Recurse -Force -ErrorAction SilentlyContinue
     Ensure-Dir (Split-Path $Manifest -Parent); $entry = "$d`t$n"
     if (-not ((Test-Path $Manifest) -and ((Get-Content $Manifest -Encoding UTF8) -contains $entry))) { Add-Content -Path $Manifest -Value $entry -Encoding UTF8 } } }
-if ($PkgAb) { Step "Scripts  $($Bin -replace [regex]::Escape($UserHome), '~')" { Ab-Install-Global } }
+if ($PkgAb -and -not $DryRun) { Step "Scripts  $($Bin -replace [regex]::Escape($UserHome), '~')" { Ab-Install-Global } }
 foreach ($d in $Claude) { $n = $Map[$d]
-  Step "Claude  $n  $($d -replace [regex]::Escape($UserHome), '~')" {
+  Step ("Claude  {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
     if ($PkgAb) { Ab-Install-Claude $d $n }
     Install-Skills $d } }
 foreach ($d in $Codex) { $n = $Map[$d]
-  Step "Codex   $n  $($d -replace [regex]::Escape($UserHome), '~')" {
+  Step ("Codex   {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
     if ($PkgAb) { Ab-Install-Codex $d $n }
     Install-Skills $d } }
 if ($Claude.Count + $Codex.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR.' }
 if ($DryRun) { Say ''; Say 'dry-run finished: nothing was written.'; return }
-function Ui-Box($title, $lines) {
-  $w = 54; Say ''; Ui-W ("  " + $S.tl + $S.h + " $title " + ($S.h * ($w - $title.Length - 3)) + $S.tr) 'Green'
-  foreach ($l in $lines) { Ui-W ("  " + $S.v + "  ") 'Green' -NoNewline; Say $l }
-  Ui-W ("  " + $S.bl + ($S.h * $w) + $S.br) 'Green'; Say '' }
 $msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count) account(s) configured" }
 $sum = @($msg); if ($SelSkills.Count -gt 0) { $sum += "$($S.ok) skills: $($SelSkills -join ' ')" }
 $sum += @('', 'Next steps', '  1. Restart open Claude/Codex sessions')

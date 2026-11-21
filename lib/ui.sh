@@ -9,24 +9,25 @@ if [ $UI_COLOR = 1 ]; then
   GRN="$(c 78)"; RED="$(c 203)"; CYN="$(c 81)"; YEL="$(c 221)"; MAG="$(c 177)"; GRY="$(c 245)"; BLU="$(c 39)"
 else c() { :; }; RST=""; BOLD=""; DIM=""; GRN=""; RED=""; CYN=""; YEL=""; MAG=""; GRY=""; BLU=""; fi
 if [ $UI_UTF = 1 ]; then
-  S_OK="✔"; S_FAIL="✖"; S_ARROW="❯"; S_ON="◉"; S_OFF="○"; S_DOT="•"; S_WARN="!"
+  S_OK="✔"; S_FAIL="✖"; S_ARROW="❯"; S_ON="◉"; S_OFF="○"; S_DOT="•"; S_WARN="!"; S_DRY="◌"
   B_TL="╭"; B_TR="╮"; B_BL="╰"; B_BR="╯"; B_H="─"; B_V="│"
   UI_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 else
-  S_OK="+"; S_FAIL="x"; S_ARROW=">"; S_ON="(*)"; S_OFF="( )"; S_DOT="*"; S_WARN="!"
+  S_OK="+"; S_FAIL="x"; S_ARROW=">"; S_ON="(*)"; S_OFF="( )"; S_DOT="*"; S_WARN="!"; S_DRY="◌"
   B_TL="+"; B_TR="+"; B_BL="+"; B_BR="+"; B_H="-"; B_V="|"
   UI_FRAMES=("-" "\\" "|" "/")
 fi
 ui_cursor_off() { [ $UI_COLOR = 1 ] && printf '%s[?25l' "$ESC"; return 0; }
 ui_cursor_on()  { [ $UI_COLOR = 1 ] && printf '%s[?25h' "$ESC"; return 0; }
 trap 'ui_cursor_on' EXIT
-ui_sleep() { [ $UI_COLOR = 1 ] && sleep "$1"; return 0; }
+ui_sleep() { [ $UI_COLOR = 1 ] && [ -z "${UI_FAST:-}" ] && sleep "$1"; return 0; }
+ui_clear() { [ $UI_COLOR = 1 ] && printf '%s[2J%s[H' "$ESC" "$ESC"; return 0; }
 ui_rep() { local s="" i=0; while [ $i -lt "$2" ]; do s="$s$1"; i=$((i+1)); done; printf '%s' "$s"; }
 
 ui_bline() { # border-color, visible-length, styled-text
   printf '  %s%s%s%s%*s%s%s%s\n' "$1" "$B_V" "$RST" "$3" $((UI_W - $2)) "" "$1" "$B_V" "$RST"; }
 ui_banner() {
-  local ver="${AGENT_BRIDGE_VERSION:-1.0.0}" t1="yerux - skills" t2="installer" t3="* featured: agent-bridge"
+  local ver="${AGENT_BRIDGE_VERSION:-1.1.0}" t1="yerux - skills" t2="installer" t3="* featured: agent-bridge"
   UI_W=50
   echo
   printf '  %s%s%s%s\n' "$(c 45)" "$B_TL" "$(ui_rep "$B_H" $UI_W)" "$B_TR$RST"; ui_sleep 0.05
@@ -48,7 +49,9 @@ ui_account_row() { # n on kind name dir
 UI_FAILS=0
 ui_run() {
   local label="$1"; shift
-  if [ "${DRY:-0}" = 1 ]; then "$@"; return 0; fi
+  if [ "${DRY:-0}" = 1 ]; then
+    printf '  %s%s%s %s\n' "$YEL" "$S_DRY" "$RST" "$label"
+    "$@" | sed "s/^ *\[dry-run\] */      ${DIM}/; s/\$/${RST}/"; return 0; fi
   if [ $UI_COLOR = 0 ]; then
     if "$@" >> "$UI_LOG" 2>&1; then echo "  [ok] $label"; else echo "  [fail] $label"; UI_FAILS=$((UI_FAILS+1)); tail -3 "$UI_LOG"; fi; return 0; fi
   "$@" >> "$UI_LOG" 2>&1 &

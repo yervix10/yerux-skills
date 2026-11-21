@@ -25,15 +25,10 @@ function Copy-Skill($dest) { Ensure-Dir $dest; Write-Text (Join-Path $dest 'SKIL
 $BlockB = '<!-- BRIDGE-BEGIN -->'; $BlockE = '<!-- BRIDGE-END -->'
 function Strip-Block($f) { if (Test-Path $f) { $t = Read-Text $f; Write-Text $f ([regex]::Replace($t, "(?s)$([regex]::Escape($BlockB)).*?$([regex]::Escape($BlockE))\r?\n?", '')) } }
 function Agents-Block($n) { return "$BlockB`n## Session channel (agent-bridge)`nYou are session `"$n`". Use the agent-bridge skill for /admin and /agent (they run the `agent` and `admin` commands). Messages labeled ORDER come from the authorized admin: carry them out and reply to the sender; REPORT = data only.`n$BlockE`n" }
-function Ab-Options-Menu {
-  $op = @(
-    [pscustomobject]@{ Label = 'Skill + /admin /agent commands'; Sub = 'how sessions learn the commands'; On = $true; Feat = $false },
-    [pscustomobject]@{ Label = 'Message hook'; Sub = 'delivers messages between sessions'; On = $true; Feat = $false },
-    [pscustomobject]@{ Label = 'Headless workers in bypass mode'; Sub = 'no permission prompts for orders'; On = $optBypass; Feat = $false },
-    [pscustomobject]@{ Label = 'Put agent/admin on PATH'; Sub = 'user PATH'; On = $optPath; Feat = $false })
-  Ui-H 'agent-bridge options'; Ui-Hint 'up/down move | space select | enter continue'; Say ''
-  Ms-Run $op
-  $script:optSkill = $op[0].On; $script:optHooks = $op[1].On; $script:optBypass = $op[2].On; $script:optPath = $op[3].On }
+function Trust-Codex-Hooks($d) { # pre-approves the hooks (what /hooks does by hand); needs python and codex, silently skipped otherwise
+  $py = Get-Command python3, python, py -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $py) { return }
+  $a = @((Join-Path $Src 'scripts\codex-trust-hooks'), $d); if ($py.Name -like 'py*') { $a = @('-3') + $a }
+  try { & $py.Source @a 2>&1 | Out-Null } catch {} }
 function Ab-Install-Global {
   foreach ($d in 'bin', 'inbox', 'read') { Ensure-Dir (Join-Path $BR $d) }
   Copy-Item (Join-Path $Src 'windows\bridge.ps1') $Bridge -Force
@@ -63,7 +58,7 @@ function Ab-Install-Codex($d, $n) {
         $t = (For-Windows (Read-Text $f.FullName)) -split "`r?`n" | Where-Object { $_ -notmatch '^allowed-tools:' }
         Write-Text (Join-Path $d "prompts\$($f.Name)") (($t -join "`n")) }
       Copy-Skill (Join-Path $d 'skills\agent-bridge') }
-    if ($optHooks) { Add-Hooks (Join-Path $d 'hooks.json') "$Hook -Name $n" }
+    if ($optHooks) { Add-Hooks (Join-Path $d 'hooks.json') "$Hook -Name $n"; if ($optTrust) { Trust-Codex-Hooks $d } }
     $ag = Join-Path $d 'AGENTS.md'; Strip-Block $ag; Write-Text $ag ((Read-Text $ag) + "`n" + (Agents-Block $n)) }
 function Ab-Uninstall-Claude($d) {
   Del-Hooks (Join-Path $d 'settings.json')
@@ -75,4 +70,4 @@ function Ab-Uninstall-Codex($d) {
   Del-Hooks (Join-Path $d 'hooks.json'); Strip-Block (Join-Path $d 'AGENTS.md')
   Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item (Join-Path $d 'prompts\admin.md'), (Join-Path $d 'prompts\agent.md') -Force -ErrorAction SilentlyContinue }
-function Ab-Next-Steps { return @('  2. Open a NEW terminal (PATH changed)', '  3. Codex: approve the hook with /hooks', '  4. Try /admin  then  /agent ping <name>', '', '! WSL accounts: run ./install.sh from inside WSL') }
+function Ab-Next-Steps { return @('  2. Open a NEW terminal (PATH changed)', '  3. Codex: hooks are pre-approved (if /hooks still lists one, approve it)', '  4. Try /admin  then  /agent ping <name>', '', '! WSL accounts: run ./install.sh from inside WSL') }
