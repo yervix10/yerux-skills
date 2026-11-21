@@ -5,14 +5,34 @@ B="${BRIDGE_DIR:-$HOME/.claude-bridge}"
 [ -n "$BRIDGE_NO_HOOK" ] && exit 0   # runners read the inbox themselves
 me="$("$(dirname "$0")/bridge-whoami")"; [ -n "$me" ] || exit 0
 admin="$(cat "$B/admin" 2>/dev/null)"
-inbox="$B/inbox/$me"; [ -d "$inbox" ] || exit 0
+inbox="$B/inbox/$me"
 shopt -s nullglob
-files=("$inbox"/*.msg); [ ${#files[@]} -gt 0 ] || exit 0
+files=(); [ -d "$inbox" ] && files=("$inbox"/*.msg)
 mode=json; [ "$1" = "--text" ] && mode=text
+# Context warning for interactive sessions (runners compact themselves): when this session's context reaches COMPACT_AT %
+# the model is told to ask the user to run /compact. At most once per 15 min, or when the context grew 10+ points since the last warning.
+warn=""
+if [ "$mode" = json ]; then
+  cw="${BRIDGE_COMPACT_AT:-$(sed -n 's/^COMPACT_AT=//p' "$B/config" 2>/dev/null | head -1)}"; cw="${cw:-40}"
+  if [ "$cw" -gt 0 ] 2>/dev/null && [ -s "$B/usage/$me.json" ]; then
+    pct="$(jq -r '.context_window.used_percentage // empty|floor' "$B/usage/$me.json" 2>/dev/null)"
+    if [ -n "$pct" ] && [ "$pct" -ge "$cw" ] 2>/dev/null; then
+      st="$B/runs/$me.ctxwarn"; last="$(cat "$st" 2>/dev/null)"; now=$(date +%s); lt="${last%%:*}"; lp="${last##*:}"
+      if [ -z "$last" ] || [ $((now - lt)) -ge 900 ] || [ $((pct - lp)) -ge 10 ]; then
+        mkdir -p "$B/runs"; echo "$now:$pct" > "$st"
+        warn="[agent-bridge] This session's context is at ${pct}% (compaction threshold: ${cw}%). You cannot run /compact yourself: tell the user, briefly, that it is a good moment to run /compact, and continue with their request."
+      fi
+    fi
+  fi
+fi
+[ ${#files[@]} -gt 0 ] || [ -n "$warn" ] || exit 0
 event=UserPromptSubmit
 [ "$mode" = json ] && event=$(jq -r '.hook_event_name // "UserPromptSubmit"' 2>/dev/null || echo UserPromptSubmit)
 mkdir -p "$B/read/$me"
-txt="Messages from the bridge channel between Claude/Codex sessions."
+txt=""; [ ${#files[@]} -gt 0 ] && txt="Messages from the bridge channel between Claude/Codex sessions."
+[ -n "$warn" ] && txt="${txt:+$txt
+
+}$warn"
 for f in "${files[@]}"; do
   base=$(basename "$f" .msg); from="${base##*-de-}"
   if [ -n "$admin" ] && [ "$from" = "$admin" ]; then
