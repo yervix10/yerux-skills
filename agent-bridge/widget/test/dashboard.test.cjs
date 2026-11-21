@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { parseDashboard } = require('../src/dashboard.cjs');
-const { formatCountdown, usageColor } = require('../src/metrics.js');
+const { formatCountdown, usageColor, sortAgents, normalizeSettings } = require('../src/metrics.js');
 
 const usage = { used: null, resets_at: null };
 const agent = {
@@ -48,4 +48,23 @@ test('formatea el reinicio desde días hasta segundos y trunca al vencer', () =>
 test('asigna los colores en ambos límites y distingue datos ausentes', () => {
   assert.deepEqual([null, 0, 59.99, 60, 84.99, 85, 100].map(usageColor),
     ['unknown', 'green', 'green', 'amber', 'amber', 'red', 'red']);
+});
+
+test('ordena primero admin y después agentes urgentes, y conserva orden manual', () => {
+  const agents = [
+    { name: 'idle', state: 'idle', role: 'worker' },
+    { name: 'working', state: 'working', role: 'worker' },
+    { name: 'admin', state: 'admin', role: 'admin' },
+    { name: 'stuck', state: 'stuck', role: 'worker' },
+    { name: 'limited', state: 'limited', role: 'worker' },
+  ];
+  assert.deepEqual(sortAgents(agents).map(({ name }) => name), ['admin', 'limited', 'stuck', 'working', 'idle']);
+  assert.deepEqual(sortAgents(agents, 'manual'), agents);
+});
+
+test('valida ajustes persistentes con valores permitidos y valores por defecto', () => {
+  assert.deepEqual(normalizeSettings({ compact: true, sort: 'manual', opacity: 80, fontSize: 14 }),
+    { compact: true, sort: 'manual', opacity: 80, fontSize: 14 });
+  assert.deepEqual(normalizeSettings({ compact: 1, sort: 'random', opacity: 1, fontSize: 99 }),
+    { compact: false, sort: 'urgency', opacity: 100, fontSize: 12 });
 });

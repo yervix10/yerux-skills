@@ -9,12 +9,12 @@ const { fetchDashboard } = require('./poll.cjs');
 const root = path.join(__dirname, '..');
 const width = 340;
 const minHeight = 46;
-const intervals = [3, 5, 10, 30];
+const intervals = [5, 10, 30];
 const command = process.argv.includes('--widget-status') ? 'status'
   : process.argv.includes('--widget-stop') ? 'stop'
     : process.argv.includes('--widget-start') ? 'start' : 'show';
 const capture = process.argv.includes('--capture');
-const defaults = { alwaysOnTop: true, interval: 3, collapsed: false };
+const defaults = { alwaysOnTop: true, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency' };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
 
 let window;
@@ -28,6 +28,9 @@ let captureStarted = false;
 let quitting = false;
 
 app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-extensions');
+app.commandLine.appendSwitch('disk-cache-size', '1048576');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128');
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   if (process.env.BRIDGE_WIDGET_X11 === '1') app.commandLine.appendSwitch('ozone-platform', 'x11');
@@ -40,6 +43,10 @@ function readSettings() {
       alwaysOnTop: stored.alwaysOnTop !== false,
       collapsed: stored.collapsed === true,
       interval: intervals.includes(stored.interval) ? stored.interval : defaults.interval,
+      compact: stored.compact === true,
+      opacity: [80, 90, 100].includes(stored.opacity) ? stored.opacity : defaults.opacity,
+      fontSize: [11, 12, 14].includes(stored.fontSize) ? stored.fontSize : defaults.fontSize,
+      sort: stored.sort === 'manual' ? 'manual' : 'urgency',
       bounds: stored.bounds,
     };
   } catch {
@@ -110,14 +117,18 @@ function updateTray() {
         },
       })),
     },
+    { label: 'Vista compacta', type: 'checkbox', checked: settings.compact, click: ({ checked }) => { settings.compact = checked; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } },
+    { label: 'Orden por urgencia', type: 'checkbox', checked: settings.sort === 'urgency', click: ({ checked }) => { settings.sort = checked ? 'urgency' : 'manual'; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } },
+    { label: 'Opacidad', submenu: [80, 90, 100].map((value) => ({ label: `${value}%`, type: 'radio', checked: settings.opacity === value, click: () => { settings.opacity = value; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } })) },
+    { label: 'Tamaño de letra', submenu: [11, 12, 14].map((value) => ({ label: `${value}px`, type: 'radio', checked: settings.fontSize === value, click: () => { settings.fontSize = value; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } })) },
     { type: 'separator' },
     { label: 'Salir', click: () => app.quit() },
   ]));
 }
 
-async function poll() {
+async function poll(force = false) {
   clearTimeout(pollingTimer);
-  if (quitting || currentPoll) return;
+  if (quitting || !window || window.isDestroyed() || (!force && (!window.isVisible() || window.isMinimized())) || currentPoll) return;
   const started = Date.now();
   currentPoll = new AbortController();
   try {
@@ -131,7 +142,7 @@ async function poll() {
   if (!window.isDestroyed() && !window.webContents.isLoadingMainFrame()) {
     window.webContents.send('dashboard:update', snapshot);
   }
-  pollingTimer = setTimeout(poll, Math.max(0, settings.interval * 1000 - (Date.now() - started)));
+  if (window.isVisible() && !window.isMinimized()) pollingTimer = setTimeout(poll, Math.max(0, settings.interval * 1000 - (Date.now() - started)));
 }
 
 async function captureWindow() {
@@ -188,6 +199,8 @@ async function createWidget() {
       nodeIntegration: false,
       sandbox: true,
       devTools: false,
+      spellcheck: false,
+      backgroundThrottling: true,
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -197,7 +210,12 @@ async function createWidget() {
   const fromWidget = (event) => event.sender === window.webContents &&
     event.senderFrame === window.webContents.mainFrame;
   ipcMain.handle('dashboard:initial', (event) => {
-    if (fromWidget(event)) return { snapshot, collapsed: settings.collapsed };
+    if (fromWidget(event)) return { snapshot, collapsed: settings.collapsed, settings };
+  });
+  ipcMain.on('dashboard:visible', (event, visible) => {
+    if (!fromWidget(event) || typeof visible !== 'boolean') return;
+    clearTimeout(pollingTimer);
+    if (visible) poll(); else currentPoll?.abort();
   });
   ipcMain.on('dashboard:layout', (event, height, collapsed, renderedData) => {
     if (!fromWidget(event) || !Number.isSafeInteger(height) || typeof collapsed !== 'boolean') return;
@@ -230,6 +248,9 @@ async function createWidget() {
       window.hide();
     }
   });
+  window.on('show', () => poll());
+  window.on('hide', () => { clearTimeout(pollingTimer); currentPoll?.abort(); });
+  window.on('minimize', () => { clearTimeout(pollingTimer); currentPoll?.abort(); });
 
   try {
     const icon = nativeImage.createFromPath(path.join(root, 'assets',
@@ -243,7 +264,7 @@ async function createWidget() {
   }
   window.once('ready-to-show', showWindow);
   await window.loadFile(path.join(__dirname, 'index.html'));
-  poll();
+  poll(true);
   if (capture) {
     const deadline = setTimeout(() => {
       if (!captureStarted) {

@@ -20,7 +20,23 @@
     return 'green';
   }
 
-  const metrics = { formatCountdown, usageColor };
+  function sortAgents(agents, mode = 'urgency') {
+    if (mode === 'manual') return [...agents];
+    const rank = { limited: 0, stuck: 1, working: 2, idle: 3, admin: 4, unknown: 5, off: 6 };
+    return [...agents].sort((a, b) => (a.role === 'admin' ? -1 : b.role === 'admin' ? 1 :
+      (rank[a.state] ?? 5) - (rank[b.state] ?? 5)) || a.name.localeCompare(b.name));
+  }
+
+  function normalizeSettings(value = {}) {
+    return {
+      compact: value.compact === true,
+      sort: value.sort === 'manual' ? 'manual' : 'urgency',
+      opacity: [80, 90, 100].includes(value.opacity) ? value.opacity : 100,
+      fontSize: [11, 12, 14].includes(value.fontSize) ? value.fontSize : 12,
+    };
+  }
+
+  const metrics = { formatCountdown, usageColor, sortAgents, normalizeSettings };
   if (typeof module === 'object' && module.exports) module.exports = metrics;
   else window.metrics = Object.freeze(metrics);
 })();

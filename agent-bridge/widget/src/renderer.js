@@ -1,6 +1,6 @@
 'use strict';
 
-const { formatCountdown, usageColor } = window.metrics;
+const { formatCountdown, usageColor, sortAgents, normalizeSettings } = window.metrics;
 const panel = document.querySelector('#panel');
 const header = document.querySelector('#header');
 const panelStyle = getComputedStyle(panel);
@@ -24,6 +24,8 @@ const percentFormat = new Intl.NumberFormat('es', { style: 'percent', maximumFra
 
 let snapshot = { data: null, disconnected: false };
 let collapsed = false;
+let settings = { compact: false, sort: 'urgency', opacity: 100, fontSize: 12 };
+let lastAgents = '';
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -59,8 +61,12 @@ function metric(label, used, resetAt = null) {
   return row;
 }
 
+function highest(agent) {
+  return Math.max(agent.context ?? 0, agent.five_hour.used ?? 0, agent.weekly.used ?? 0, agent.monthly.used ?? 0);
+}
+
 function agentCard(agent) {
-  const card = element('article', 'agent');
+  const card = element('article', `agent${settings.compact ? ' compact' : ''}`);
   const identity = element('div', 'identity');
   const name = element('h2', 'agent-name', agent.name);
   name.title = agent.name;
@@ -69,6 +75,13 @@ function agentCard(agent) {
 
   const state = element('span', `state state-${agent.state}`, states[agent.state]);
   identity.append(state);
+  if (agent.context !== null && agent.context > 40) identity.append(element('span', 'badge badge-warning', 'Compactará'));
+  if (agent.tier === 'skip') identity.append(element('span', 'badge badge-critical', 'Skip'));
+  if (settings.compact) {
+    card.append(identity, element('span', 'compact-percent', `${highest(agent)}%`), element('span', 'compact-tier', agent.tier || '—'));
+    card.title = agent.detail || agent.name;
+    return card;
+  }
   card.append(identity);
 
   const metadata = element('div', 'metadata');
@@ -90,12 +103,24 @@ function agentCard(agent) {
     line.title = project;
     card.append(line);
   }
+  if (agent.detail && agent.detail !== '-') {
+    const detail = element('p', 'detail truncate', agent.detail);
+    detail.title = agent.detail;
+    card.append(detail);
+  }
 
   const metrics = element('div', 'metrics');
   metrics.append(metric('Contexto', agent.context));
+  const availableLimits = periods.map(([key, label]) => ({ key, label, usage: agent[key] }))
+    .filter(({ usage }) => usage.used !== null);
+  const tightest = availableLimits.sort((a, b) => a.usage.used - b.usage.used)[0]?.key;
   for (const [key, label] of periods) {
     const usage = agent[key];
-    if (usage.used !== null) metrics.append(metric(label, usage.used, usage.resets_at));
+    if (usage.used !== null) {
+      const row = metric(label, usage.used, usage.resets_at);
+      if (key === tightest) row.classList.add('tightest-limit');
+      metrics.append(row);
+    }
   }
   card.append(metrics);
 
@@ -139,7 +164,7 @@ function updateClock() {
 
 function render() {
   const { data, disconnected } = snapshot;
-  const agents = data?.agents ?? [];
+  const agents = sortAgents(data?.agents ?? [], settings.sort);
   const working = agents.filter(({ state }) => state === 'working').length;
   const limited = agents.filter(({ state }) => state === 'limited').length;
   const total = `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'}`;
@@ -159,10 +184,18 @@ function render() {
     updated.title = `Última actualización: ${date.toLocaleString('es')}`;
     updated.setAttribute('aria-label', updated.title);
   }
-  const scroll = content.scrollTop;
-  list.replaceChildren(...agents.map(agentCard));
-  if (data && !agents.length) list.append(element('p', 'empty', 'No hay agentes conectados'));
-  content.scrollTop = scroll;
+  const fingerprint = JSON.stringify(agents.map((agent) => ({
+    ...agent,
+    data_age_s: null,
+    detail: agent.detail.replace(/\b\d+s\b/g, 'N s').replace(/\[N s ago\]/g, '[age]'),
+  })));
+  if (fingerprint !== lastAgents) {
+    const scroll = content.scrollTop;
+    list.replaceChildren(...agents.map(agentCard));
+    if (data && !agents.length) list.append(element('p', 'empty', 'No hay agentes conectados'));
+    content.scrollTop = scroll;
+    lastAgents = fingerprint;
+  }
   updateClock();
   reportLayout(!!data);
 }
@@ -196,5 +229,16 @@ window.bridgeWidget.onUpdate((next) => {
 window.bridgeWidget.initial().then((initial) => {
   if (snapshot.data === null && !snapshot.disconnected) snapshot = initial.snapshot;
   collapsed = initial.collapsed;
+  settings = normalizeSettings(initial.settings || settings);
+  applySettings();
   applyCollapsed();
 });
+
+function applySettings() {
+  document.documentElement.style.setProperty('--font-size', `${settings.fontSize || 12}px`);
+  document.documentElement.style.setProperty('--opacity', `${(settings.opacity || 100) / 100}`);
+  lastAgents = '';
+  render();
+}
+window.bridgeWidget.onSettings((next) => { settings = normalizeSettings(next); applySettings(); });
+document.addEventListener('visibilitychange', () => window.bridgeWidget.visibility(!document.hidden));
