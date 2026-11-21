@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('bridgeWidget', {
   initial: () => ipcRenderer.invoke('dashboard:initial'),
   readFeed: (name) => ipcRenderer.invoke('feed:read', name),
+  controlOptions: (name) => ipcRenderer.invoke('control:options', name),
+  control: (request) => ipcRenderer.invoke('control:execute', request),
+  copyCompact: () => ipcRenderer.invoke('control:copy-compact'),
+  copyText: (value) => ipcRenderer.invoke('control:copy-text', value),
   onCaptureFeed: (callback) => ipcRenderer.on('capture:feed', () => callback()),
   onUpdate: (callback) => {
     ipcRenderer.on('dashboard:update', (_event, snapshot) => callback(snapshot));

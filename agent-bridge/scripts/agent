@@ -107,6 +107,16 @@ case "$1" in
         [ $once = 1 ] && break; sleep 2; done;;
   capacity) shift; exec "$D/bridge-capacity" "$@";;
   widget) shift; exec "$D/bridge-widget" "$@";;
+  compact) n="$2"; adm="$(cat "$R/admin" 2>/dev/null)"
+      [ "$me" = "$adm" ] || { echo "only the admin can compact a worker (you are $me)" >&2; exit 1; }
+      [ -n "$n" ] && awk -F= -v n="$n" '$2==n{found=1} END{exit !found}' "$R/names.conf" || { echo "unknown worker: $n" >&2; exit 1; }
+      [ "$n" != "$adm" ] || { echo "the admin is interactive; use /compact in its terminal" >&2; exit 1; }
+      [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null || { echo "$n: runner is not active; no session can be compacted now" >&2; exit 1; }
+      state="$(sed -n 's/^status=//p' "$R/runs/$n.state" 2>/dev/null | head -1)"
+      if [ "$state" = idle ]; then has_session=0; for sf in "$R/sessions/$n"/*; do case "$sf" in *.cwd) continue;; esac; [ -f "$sf" ] && { has_session=1; break; }; done
+        [ "$has_session" = 1 ] || { echo "$n: no saved session to compact yet" >&2; exit 1; }; fi
+      mkdir -p "$R/runs"; tmp="$R/runs/$n.compact.request.tmp.$$"; printf 'requested_at=%s\n' "$(date +%s)" > "$tmp" && mv "$tmp" "$R/runs/$n.compact.request" || exit 1
+      echo "$n: compaction queued (starts now if idle, otherwise before its next order)";;
   model|effort) cmd="$1"; shift; n="$1"; v="$2"; f="$R/models"; [ "$cmd" = effort ] && f="$R/effort"
       if [ -z "$n" ]; then for w in $(awk -F= '{print $2}' "$R/names.conf"); do echo "$w: model $(cat "$R/models/$w" 2>/dev/null || echo default), effort $(cat "$R/effort/$w" 2>/dev/null || echo default)"; done; exit 0; fi
       [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] || { echo "only the admin can change a worker's $cmd (you are $me)" >&2; exit 1; }
@@ -125,7 +135,7 @@ case "$1" in
   list) "$D/bridge-send" --list ;;
   inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
   listen) exec "$D/bridge-wait" ;;
-  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once|--json] | agent capacity [--apply] | agent widget [start|stop|status] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once|--json] | agent capacity [--apply] | agent widget [start|stop|status] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent compact <worker> | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
   *) to="$1"; shift
      # the admin is warned when it sends work to a worker with little headroom (it is not blocked)
      if [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] && [ "$to" != all ] && [ "${#1}" -gt 40 ]; then t="$("$D/bridge-capacity" --tier "$to" 2>/dev/null)"

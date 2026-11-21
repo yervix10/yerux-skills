@@ -24,7 +24,18 @@
       </button>
     </header>
     <main id="content">
-      <section id="detail-view" hidden aria-label="Actividad del agente"><button id="detail-back" type="button">← Volver</button><div id="detail-status"></div><div id="detail-events"></div><small id="live-indicator">● En vivo</small></section>
+      <section id="detail-view" hidden aria-label="Actividad del agente">
+        <div class="detail-toolbar"><button id="detail-back" type="button">← Volver</button><strong id="detail-title"></strong><span id="live-indicator">● En vivo</span></div>
+        <div id="detail-status"></div>
+        <section id="detail-controls" aria-label="Controles del agente">
+          <div id="worker-controls"><label>Modelo<select id="model-select"></select></label><button id="apply-model" type="button">Aplicar</button><label>Esfuerzo<select id="effort-select"></select></label><button id="apply-effort" type="button">Aplicar</button><small id="next-order-note">Modelo y esfuerzo se aplican desde la próxima orden.</small><small id="control-security-note" hidden>Abre el widget desde la sesión admin para gestionar workers.</small><button id="compact-worker" type="button">Compactar ahora</button></div>
+          <p id="admin-controls-note" hidden>La sesión admin es interactiva. Usa /model o /compact en tu terminal.</p><button id="copy-compact" type="button" hidden>Copiar /compact</button>
+          <small id="control-feedback" role="status"></small>
+        </section>
+        <button id="new-events" type="button" hidden></button>
+        <div id="detail-events"></div>
+      </section>
+      <dialog id="confirm-action"><p id="confirm-message"></p><div><button id="confirm-cancel" type="button">Cancelar</button><button id="confirm-accept" type="button">Confirmar</button></div></dialog>
       <p id="connection" role="status" hidden>Sin conexión con el bridge</p>
       <div id="agents">
         <section id="admins" class="agent-list" aria-label="Administración"></section>

@@ -1,12 +1,13 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, session, Tray } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { fetchDashboard } = require('./poll.cjs');
 const { normalizeGroupOpen } = require('./metrics.js');
+const { effortOptions, modelOptions, validateControl, authorizeAdminAction } = require('./control.cjs');
 
 const root = path.join(__dirname, '..');
 const width = 340;
@@ -162,6 +163,48 @@ function feedScript() {
   return candidates.find((file) => { try { fs.accessSync(file, fs.constants.X_OK); return true; } catch { return false; } });
 }
 
+function targetAgent(event, name) {
+  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || typeof name !== 'string' || !/^[A-Za-z0-9_-]{1,48}$/.test(name)) return null;
+  return snapshot.data?.agents?.find((agent) => agent.name === name) || null;
+}
+
+function accountHome(name) {
+  const bridge = process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge');
+  try { return fs.readFileSync(path.join(bridge, 'names.conf'), 'utf8').split(/\r?\n/).find((line) => line.split('=')[1] === name)?.split('=')[0] || ''; } catch { return ''; }
+}
+
+function sessionIdentity() {
+  if (process.env.BRIDGE_NAME) return process.env.BRIDGE_NAME;
+  const bridge = process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge');
+  if (process.env.CLAUDE_CONFIG_DIR) {
+    try { return fs.readFileSync(path.join(bridge, 'names.conf'), 'utf8').split(/\r?\n/).find((line) => line.split('=')[0] === process.env.CLAUDE_CONFIG_DIR.replace(/\/$/, ''))?.split('=')[1] || ''; } catch { return ''; }
+  }
+  const codexHome = (process.env.CODEX_HOME || path.join(require('node:os').homedir(), '.codex')).replace(/\/$/, '');
+  try { return fs.readFileSync(path.join(bridge, 'names.conf'), 'utf8').split(/\r?\n/).find((line) => line.split('=')[0] === codexHome)?.split('=')[1] || ''; } catch { return ''; }
+}
+
+function adminActionAllowed() {
+  const admin = snapshot.data?.agents?.find((item) => item.role === 'admin')?.name;
+  let recordedAdmin = '';
+  try { recordedAdmin = fs.readFileSync(path.join(process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge'), 'admin'), 'utf8').trim(); } catch {}
+  return Boolean(admin && admin === recordedAdmin && sessionIdentity() === admin);
+}
+
+function runAdminAction(agent, args) {
+  const script = feedScript();
+  if (!script) return Promise.reject(new Error('No se encontró el CLI del bridge'));
+  const commandPath = path.join(path.dirname(script), 'agent');
+  const admin = snapshot.data?.agents?.find((item) => item.role === 'admin')?.name;
+  if (!adminActionAllowed() || !agent || agent.role === 'admin') return Promise.reject(new Error(sessionIdentity() !== admin ? 'Para cambiar workers, inicia el widget desde la sesión admin.' : 'Acción reservada a workers y al admin activo'));
+  let recordedAdmin = ''; try { recordedAdmin = fs.readFileSync(path.join(process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge'), 'admin'), 'utf8').trim(); } catch {}
+  const authError = authorizeAdminAction({ dashboardAdmin: admin, recordedAdmin, sessionName: sessionIdentity(), target: agent });
+  if (authError) return Promise.reject(new Error(authError));
+  return new Promise((resolve, reject) => execFile(commandPath, args, {
+    encoding: 'utf8', timeout: 8000, maxBuffer: 128 * 1024,
+    env: { ...process.env, BRIDGE_NAME: admin },
+  }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout.trim())));
+}
+
 async function poll(force = false) {
   clearTimeout(pollingTimer);
   if (quitting || !window || window.isDestroyed() || (!force && (!window.isVisible() || window.isMinimized())) || currentPoll) return;
@@ -281,6 +324,46 @@ async function createWidget() {
         try { resolve(JSON.parse(stdout)); } catch { resolve(unavailable); }
       });
     });
+  });
+  ipcMain.handle('control:options', async (event, name) => {
+    const agent = targetAgent(event, name);
+    if (!agent) return null;
+    if (agent.kind === 'claude') return { model: modelOptions(agent.kind), effort: effortOptions(agent.kind), configuredModel: agent.set_model || 'default', configuredEffort: agent.set_effort || 'default', authorized: adminActionAllowed() };
+    if (agent.kind !== 'codex') return { model: [], effort: [], configuredModel: 'default', configuredEffort: 'default', authorized: adminActionAllowed() };
+    return new Promise((resolve) => execFile('codex', ['debug', 'models'], { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, CODEX_HOME: accountHome(agent.name) || process.env.CODEX_HOME } }, (error, stdout) => {
+      let models = [];
+      try { if (!error) models = JSON.parse(stdout).models.filter((m) => m.visibility !== 'hide').map((m) => m.slug); } catch {}
+      resolve({ model: modelOptions(agent.kind, models), effort: effortOptions(agent.kind), configuredModel: agent.set_model || 'default', configuredEffort: agent.set_effort || 'default', authorized: adminActionAllowed() });
+    }));
+  });
+  ipcMain.handle('control:execute', async (event, request) => {
+    if (!request || typeof request !== 'object') return { ok: false, message: 'Solicitud inválida' };
+    const agent = targetAgent(event, request.name);
+    if (!agent) return { ok: false, message: 'Agente no disponible en el dashboard' };
+    try {
+      let codexModels = [];
+      if (agent.kind === 'codex' && request.action === 'model') codexModels = await new Promise((resolve) => execFile('codex', ['debug', 'models'], { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, CODEX_HOME: accountHome(agent.name) || process.env.CODEX_HOME } }, (_error, stdout) => { try { resolve(JSON.parse(stdout).models.filter(m => m.visibility !== 'hide').map(m => m.slug)); } catch { resolve([]); } }));
+      const validationError = validateControl(agent, request, codexModels);
+      if (validationError) throw new Error(validationError);
+      if (request.action === 'model') {
+        return { ok: true, message: await runAdminAction(agent, ['model', agent.name, request.value]) };
+      }
+      if (request.action === 'effort') {
+        return { ok: true, message: await runAdminAction(agent, ['effort', agent.name, request.value]) };
+      }
+      if (request.action === 'compact') return { ok: true, message: await runAdminAction(agent, ['compact', agent.name]) };
+      throw new Error('Acción no permitida');
+    } catch (error) { return { ok: false, message: error.message }; }
+  });
+  ipcMain.handle('control:copy-compact', (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return false;
+    let recordedAdmin = ''; try { recordedAdmin = fs.readFileSync(path.join(process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge'), 'admin'), 'utf8').trim(); } catch {}
+    if (!recordedAdmin || !snapshot.data?.agents?.some((agent) => agent.role === 'admin' && agent.name === recordedAdmin)) return false;
+    clipboard.writeText('/compact'); return true;
+  });
+  ipcMain.handle('control:copy-text', (event, value) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || typeof value !== 'string' || value.length > 4000) return false;
+    clipboard.writeText(value); return true;
   });
   ipcMain.on('dashboard:visible', (event, visible) => {
     if (!fromWidget(event) || typeof visible !== 'boolean') return;

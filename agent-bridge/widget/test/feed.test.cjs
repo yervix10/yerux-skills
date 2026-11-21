@@ -14,7 +14,9 @@ test('parsea formato Codex', () => {
   const order = parseCodex(JSON.stringify({timestamp:'2026-01-01T00:00:00Z',type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'orden'}]}}));
   const assistant = parseCodex(JSON.stringify({timestamp:'2026-01-01T00:00:02Z',type:'response_item',payload:{type:'message',role:'assistant',content:[{type:'output_text',text:'Voy a revisar'}]}}));
   const tool = parseCodex(JSON.stringify({timestamp:'2026-01-01T00:00:03Z',type:'response_item',payload:{type:'custom_tool_call',name:'exec',input:'ls'}}));
+  const objectTool = parseCodex(JSON.stringify({type:'response_item',payload:{type:'custom_tool_call',name:'exec',input:{cmd:'pwd',args:['-P']}}}));
   assert.deepEqual([order[0].role, assistant[0].role, tool[0].role], ['order','assistant','tool']);
+  assert.equal(objectTool[0].text, '{"cmd":"pwd","args":["-P"]}');
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'message',role:'developer',content:[{text:'contexto'}]}})).length,0);
 });
 test('elimina envoltorio del runner y ruido AGENTS', () => {

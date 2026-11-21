@@ -52,6 +52,8 @@ Para un adaptador de Node en Windows puedes usar una ruta como `C:\Bridge\agent-
 
 La interfaz usa un tema oscuro acrílico y cambia a claro según `prefers-color-scheme`. Admin aparece fijo arriba; los demás agentes se agrupan en acordeones accesibles **Trabajando** (abierto inicialmente) y **Libres** (cerrado inicialmente, incluye idle, limitado y otros estados no activos). Los grupos vacíos se ocultan y el estado desplegado se guarda en `widget.json`. Cada tarjeta muestra solo las filas de contexto y cuotas que tienen uso o reinicio. La vista compacta conserva una fila por agente; la detallada muestra métricas con tooltip. Los acordeones reordenan agentes por urgencia dentro de cada grupo y mantienen los nodos de tarjeta al cambiar de grupo, además del scroll. La captura final muestra un codex solo mensual, otro con 5 h y semana, un Claude y un agente sin límites.
 
+Al abrir una tarjeta, el feed muestra lo más reciente arriba y conserva la posición si estás leyendo más atrás; el botón **N nuevos · Ir a lo más reciente** vuelve al inicio. Mensajes admin y agente tienen estilos propios; Markdown ligero y bloques de código se construyen con nodos DOM seguros. Los workers ofrecen selector de modelo/esfuerzo y compactación manual confirmada. La sesión admin no se puede cambiar desde fuera: sus controles quedan desactivados y el botón copia `/compact` para usarlo en la terminal.
+
 Para reducir consumo, Chromium limita el heap V8 a 128 MiB, la caché de disco a 1 MiB, desactiva corrector y extensiones y mantiene activo el throttling en segundo plano. Conservamos aceleración gráfica para compatibilidad con las ventanas transparentes en Wayland/X11.
 
 ### Mediciones locales
