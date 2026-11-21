@@ -16,6 +16,13 @@ const command = process.argv.includes('--widget-status') ? 'status'
 const capture = process.argv.includes('--capture');
 const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency' };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
+const appIcon = path.join(root, 'assets', 'agent-bridge.png');
+
+app.setName('Agent Bridge');
+if (process.platform === 'linux') {
+  app.setDesktopName('agent-bridge.desktop');
+  app.commandLine.appendSwitch('class', 'agent-bridge');
+}
 
 let window;
 let tray;
@@ -215,6 +222,7 @@ async function createWidget() {
     transparent: true,
     backgroundColor: '#00000000',
     title: 'Agent Bridge',
+    icon: appIcon,
     skipTaskbar: !settings.showInTaskbar,
     ...(process.platform === 'win32' ? { type: 'toolbar' } : {}),
     ...(process.platform === 'linux' ? { type: process.env.BRIDGE_WIDGET_X11 === '1' ? 'dock' : 'utility' } : {}),
@@ -290,7 +298,7 @@ async function createWidget() {
 
   try {
     const icon = nativeImage.createFromPath(path.join(root, 'assets',
-      process.platform === 'win32' ? 'bridge.ico' : process.platform === 'darwin' ? 'bridgeTemplate.png' : 'bridge.png'));
+      process.platform === 'win32' ? 'bridge.ico' : process.platform === 'darwin' ? 'bridgeTemplate.png' : 'agent-bridge.png'));
     tray = new Tray(icon);
     tray.setToolTip('Agent Bridge');
     tray.on('click', () => window.isVisible() ? window.hide() : showWindow());

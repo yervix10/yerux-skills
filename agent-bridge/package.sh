@@ -24,7 +24,18 @@ do_scripts() {
   printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; printf 'BYPASS=%s\n' "$OPT_BYPASS" > "$BR/config"; do_widget; }
 # Desktop widget (Electron): linked at ~/.claude-bridge/widget and installed with npm when Node >= 22.12 exists. BRIDGE_INSTALL_WIDGET=0 skips it.
 do_widget() { [ "${BRIDGE_INSTALL_WIDGET:-1}" = 1 ] && [ -d "$SRC/widget" ] || return 0
-  ln -sfn "$SRC/widget" "$BR/widget"; chmod +x "$SRC/widget/bin/agent-bridge-widget" 2>/dev/null
+  mkdir -p "$BR" && ln -sfn "$SRC/widget" "$BR/widget"; chmod +x "$SRC/widget/bin/agent-bridge-widget" 2>/dev/null
+  if [ "$OS" = linux ] && [ "${DRY:-0}" != 1 ]; then
+    local app_dir="$HOME/.local/share/applications" icon_dir="$HOME/.local/share/icons/hicolor" size
+    mkdir -p "$app_dir" "$icon_dir/scalable/apps" || return 1
+    cp "$SRC/widget/assets/agent-bridge.svg" "$icon_dir/scalable/apps/agent-bridge.svg"
+    for size in 512 256 128 64 32; do
+      mkdir -p "$icon_dir/${size}x${size}/apps"
+      cp "$SRC/widget/assets/agent-bridge-${size}.png" "$icon_dir/${size}x${size}/apps/agent-bridge.png"
+    done
+    printf '[Desktop Entry]\nType=Application\nName=Agent Bridge\nComment=Dashboard de sesiones Agent Bridge\nExec="%s/widget/bin/agent-bridge-widget" start\nIcon=agent-bridge\nTerminal=false\nCategories=Utility;\nStartupWMClass=agent-bridge\n' "$BR" > "$app_dir/agent-bridge.desktop"
+    chmod 644 "$app_dir/agent-bridge.desktop"
+  fi
   command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { say "widget: Node.js/npm not found; install Node >= 22.12 and run 'npm ci --include=dev' in $SRC/widget"; return 0; }
   [ -d "$SRC/widget/node_modules/electron" ] || ( cd "$SRC/widget" && npm ci --include=dev >/dev/null 2>&1 ) || say "widget: 'npm ci' failed; run it by hand in $SRC/widget"; return 0; }
 do_path() { mkdir -p "$HOME/.local/bin" && ln -sfn "$BR/bin/agent" "$HOME/.local/bin/agent" && ln -sfn "$BR/bin/admin" "$HOME/.local/bin/admin"; }

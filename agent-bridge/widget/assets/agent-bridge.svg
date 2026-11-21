@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" aria-label="Agent Bridge">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#182b46"/><stop offset="1" stop-color="#091321"/></linearGradient>
+    <linearGradient id="link" x1="128" y1="128" x2="390" y2="390" gradientUnits="userSpaceOnUse"><stop stop-color="#70f0d0"/><stop offset="1" stop-color="#32b6ee"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="132" fill="url(#bg)"/>
+  <path d="M208 184l-31-31a76 76 0 0 0-108 108l73 73a76 76 0 0 0 108 0l31-31" fill="none" stroke="#e9f4ff" stroke-width="34" stroke-linecap="round" opacity=".9"/>
+  <path d="M304 328l31 31a76 76 0 0 0 108-108l-73-73a76 76 0 0 0-108 0l-31 31" fill="none" stroke="url(#link)" stroke-width="34" stroke-linecap="round"/>
+  <path d="M190 322l132-132" fill="none" stroke="url(#link)" stroke-width="34" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="351" cy="161" r="17" fill="#a1ffe5"/>
+</svg>
