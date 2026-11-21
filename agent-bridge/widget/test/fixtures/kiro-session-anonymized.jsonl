@@ -1,0 +1,6 @@
+{"id":"message-a","timestamp":"2026-11-21T20:13:57.000Z","payload":{"type":"user","content":"You are worker 'kiro-1' in a team.\n\nOrder:\nResponde solo: ok"}}
+{"type":"sessionUpdate","data":{"sessionId":"sess_anon","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}
+{"type":"sessionUpdate","data":{"sessionId":"sess_anon","update":{"sessionUpdate":"tool_call","toolCall":{"title":"Read file","name":"fs_read","rawInput":{"path":"README.md"}}}}}
+{"type":"sessionUpdate","data":{"sessionId":"sess_anon","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":"README content"}}}
+{"type":"sessionUpdate","data":{"sessionId":"sess_anon","update":{"sessionUpdate":"session_info_update","_meta":{"kiro":{"kind":"context_usage","usagePercentage":5.2}}}}}
+{"type":"runFinished","data":{"sessionId":"sess_anon","status":"success","finalText":"ok","finalTextTruncated":false}}

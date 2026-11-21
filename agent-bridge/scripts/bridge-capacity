@@ -16,7 +16,7 @@ declare -A TIER REM NOTE MODEL EFF KIND WIN
 names=(); total=0
 for n in $(awk -F= '{print $2}' "$B/names.conf"); do
   [ "$n" = "$admin" ] && continue; [ -n "$only" ] && [ "$n" != "$only" ] && continue
-  dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$B/names.conf")"; case "$(basename "$dir")" in .claude*) k=claude;; *) k=codex;; esac
+  dir="$(awk -F= -v n="$n" '$2==n{print $1; exit}' "$B/names.conf")"; k="$("$D/bridge-provider" "$dir" 2>/dev/null || echo codex)"
   IFS=$'\t' read -r _ _ _ ctx h5 wk _ _ h5r wkr mo mor < <("$D/bridge-usage" "$n" 2>/dev/null)
   for v in ctx h5 wk h5r wkr mo mor; do [ "${!v}" = - ] && printf -v "$v" ''; done
   best=101; bw=""; bwr=""; penal=0; ontrack=1; any=0
@@ -25,7 +25,7 @@ for n in $(awk -F= '{print $2}' "$B/names.conf"); do
     if [ -n "$r" ] && [ "$r" -gt "$now" ] 2>/dev/null && [ "$wn" != h5 ]; then el=$(( (len - (r - now)) * 100 / len )); [ $((p - el)) -gt 15 ] && penal=1; [ $((p - el)) -gt 0 ] && ontrack=0; fi
     [ "$wn" != h5 ] && [ -z "$r" ] && ontrack=0
     [ $rem -lt $best ] && { best=$rem; bw=$wn; bwr=$r; }; done
-  if [ $any = 0 ]; then t=normal; best=50; note="sin datos de límite"; else
+  if [ $any = 0 ]; then t=normal; best=50; note="sin datos de límite"; [ "$k" = kiro ] && note="Kiro sin medición de cuota; tier normal"; else
     if [ $best -le 5 ]; then t=skip; elif [ $best -le 20 ]; then t=light; elif [ $best -le 50 ]; then t=normal; else t=heavy; fi
     if [ $penal = 1 ]; then case $t in heavy) t=normal;; normal) t=light;; esac; note="ritmo alto en $(lbl "$bw")"; else note=""; fi
     [ -n "$bwr" ] && note="${note:+$note; }límite $(lbl "$bw") ↻$(fmt "$bwr")"; fi
@@ -33,6 +33,7 @@ for n in $(awk -F= '{print $2}' "$B/names.conf"); do
   [ -n "$ctx" ] && [ "$ctx" -ge "$(sed -n 's/^COMPACT_AT=//p' "$B/config" 2>/dev/null | head -1 | grep -E '^[1-9][0-9]*$' || echo 40)" ] && note="${note:+$note; }ctx ${ctx}% (compactará)"
   m="-"; e="-"
   if [ "$k" = claude ]; then case $t in light) m=sonnet; e=low;; normal) m=sonnet; e=medium;; heavy) m=sonnet; e=high;; esac   # Claude always runs sonnet (balanced for day-to-day work), never opus
+  elif [ "$k" = kiro ]; then m="(Kiro)"; case $t in light) e=low;; normal) e=medium;; heavy) e=high;; esac
   else case $t in light) e=low;; normal) e=medium;; heavy) e=medium; [ $best -ge 80 ] && [ $ontrack = 1 ] && e=high;; esac; m="(su modelo)"; fi
   TIER[$n]=$t; REM[$n]=$best; NOTE[$n]=$note; MODEL[$n]=$m; EFF[$n]=$e; KIND[$n]=$k; names+=("$n"); [ "$t" != skip ] && total=$((total + best))
 done
@@ -42,4 +43,4 @@ for n in "${names[@]}"; do share="-"; [ "${TIER[$n]}" != skip ] && [ $total -gt 
   printf '%-9s %-7s %-6s %-6s %-12s %-7s %s\n' "$n" "${TIER[$n]}" "${REM[$n]}%" "$share" "${MODEL[$n]}" "${EFF[$n]}" "${NOTE[$n]}"; done
 echo; echo "tiers: heavy = tareas grandes/difíciles · normal = tareas medianas · light = solo tareas cortas · skip = no asignar hasta el reinicio. 'carga' = reparto sugerido del trabajo."
 if [ $apply = 1 ]; then echo; for n in "${names[@]}"; do [ "${TIER[$n]}" = skip ] && { echo "$n: sin cambios (skip)"; continue; }
-    if [ "${KIND[$n]}" = claude ]; then "$D/agent" model "$n" "${MODEL[$n]}" "${EFF[$n]}"; else "$D/agent" effort "$n" "${EFF[$n]}"; fi; done; fi
+    if [ "${KIND[$n]}" = claude ]; then "$D/agent" model "$n" "${MODEL[$n]}" "${EFF[$n]}"; elif [ "${KIND[$n]}" = kiro ]; then "$D/agent" effort "$n" "${EFF[$n]}"; else "$D/agent" effort "$n" "${EFF[$n]}"; fi; done; fi

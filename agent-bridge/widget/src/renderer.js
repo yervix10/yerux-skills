@@ -80,7 +80,7 @@ function metric({ label, used, resetsAt = null, context = false }) {
 }
 
 function agentCard(agent) {
-  const card = element('article', `agent${settings.compact ? ' compact' : ''}${agent.role === 'admin' ? ' agent-admin' : ''}`);
+  const card = element('article', `agent${settings.compact ? ' compact' : ''} agent-${agent.kind}${agent.role === 'admin' ? ' agent-admin' : ''}`);
   const identity = element('div', 'identity');
   const identityMain = element('div', 'identity-main');
   const name = element('h2', 'agent-name', agent.name);
@@ -89,13 +89,13 @@ function agentCard(agent) {
   identity.append(identityMain);
   const labels = element('div', 'identity-labels');
   if (agent.role === 'admin') labels.append(element('span', 'badge badge-admin', 'Admin'));
-  labels.append(element('span', 'badge', agent.kind));
+  labels.append(element('span', `badge badge-${agent.kind}`, agent.kind === 'kiro' ? '✦ Kiro' : agent.kind));
   if (agent.context !== null && agent.context > 40) labels.append(element('span', 'badge badge-warning', 'Compactará'));
   if (agent.tier === 'skip') labels.append(element('span', 'badge badge-critical', 'Skip'));
   identity.append(labels);
   if (settings.compact) {
     const usage = highestUsage(agent);
-    card.append(identity, element('span', 'compact-percent', usage === null ? '—' : `${usage}%`), element('span', 'compact-tier', agent.tier || '—'));
+    card.append(identity, element('span', 'compact-percent', usage === null ? '—' : `${usage}%`), element('span', 'compact-tier', Number.isFinite(agent.credit_used) ? `${agent.credit_used.toFixed(2)} cr` : agent.tier || '—'));
     card.title = agent.detail || agent.name;
     return card;
   }
@@ -107,6 +107,7 @@ function agentCard(agent) {
   const modelLine = element('span', 'model-badge truncate', model);
   modelLine.title = modelLine.textContent;
   metadata.append(modelLine);
+  if (Number.isFinite(agent.credit_used)) metadata.append(element('span', 'effort-badge', `${agent.credit_used.toFixed(2)} créditos`));
   if (effort) metadata.append(element('span', 'effort-badge', effort));
   if (agent.tier) {
     const tier = element('span', `tier tier-${agent.tier}`, agent.tier);

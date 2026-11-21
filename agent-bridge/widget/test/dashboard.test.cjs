@@ -34,6 +34,11 @@ test('acepta datos reales del esquema y copia solo campos conocidos', () => {
   assert.deepEqual(parseDashboard('{"time":0,"agents":[]}'), { time: 0, agents: [] });
   assert.equal(parseDashboard(JSON.stringify({ time: 0, agents: [{ ...agent, context: null, data_age_s: null }] })).agents[0].context, null);
 });
+test('acepta Kiro como worker y créditos de sesión opcionales', () => {
+  const kiro = { ...agent, name: 'kiro-1', kind: 'kiro', credit_used: 0.15 };
+  assert.equal(parseDashboard(JSON.stringify({ time: 1000, agents: [kiro] })).agents[0].credit_used, 0.15);
+  assert.throws(() => parseDashboard(JSON.stringify({ time: 1000, agents: [{ ...kiro, credit_used: -1 }] })));
+});
 
 test('rechaza JSON, esquema, duplicados y métricas inválidas', () => {
   for (const input of ['{', 'null', '{"time":0,"agents":null}', '{"time":-1,"agents":[]}']) {

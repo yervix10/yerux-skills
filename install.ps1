@@ -4,7 +4,7 @@
 # Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-Safe] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\install.ps1
-param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$Safe, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$Name = @())
+param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$Safe, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$KiroDir = @(), [string[]]$Name = @())
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -66,17 +66,20 @@ function Norm($p) {
   return $p.TrimEnd('\') }
 $Claude = New-Object System.Collections.Generic.List[string]
 $Codex = New-Object System.Collections.Generic.List[string]
+$Kiro = New-Object System.Collections.Generic.List[string]
 function Add-Dir($kind, $p) {
   $d = Norm $p; if (-not $d -or -not (Test-Path $d -PathType Container)) { return }
   if ((Split-Path $d -Leaf) -eq '.claude-bridge') { return }
-  $list = $Codex; if ($kind -eq 'claude') { $list = $Claude }
+  $list = $Codex; if ($kind -eq 'claude') { $list = $Claude } elseif ($kind -eq 'kiro') { $list = $Kiro }
   if (-not ($list | Where-Object { $_ -ieq $d })) { $list.Add($d) } }
 foreach ($d in $ClaudeDir) { Add-Dir 'claude' $d }
 foreach ($d in $CodexDir) { Add-Dir 'codex' $d }
+foreach ($d in $KiroDir) { Add-Dir 'kiro' $d }
 foreach ($d in (Get-ChildItem $UserHome -Directory -Force -Filter '.claude*' -ErrorAction SilentlyContinue)) {
   foreach ($m in 'settings.json', '.credentials.json', 'projects', 'commands', 'skills') { if (Test-Path (Join-Path $d.FullName $m)) { Add-Dir 'claude' $d.FullName; break } } }
 foreach ($d in (Get-ChildItem $UserHome -Directory -Force -Filter '.codex*' -ErrorAction SilentlyContinue)) {
   foreach ($m in 'auth.json', 'config.toml', 'hooks.json', 'sessions') { if (Test-Path (Join-Path $d.FullName $m)) { Add-Dir 'codex' $d.FullName; break } } }
+if ((Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.kiro\sessions'))) { Add-Dir 'kiro' (Join-Path $UserHome '.kiro') }
 foreach ($scope in 'Process', 'User', 'Machine') {
   $v = [Environment]::GetEnvironmentVariable('CLAUDE_CONFIG_DIR', $scope); if ($v) { Add-Dir 'claude' $v }
   $v = [Environment]::GetEnvironmentVariable('CODEX_HOME', $scope); if ($v) { Add-Dir 'codex' $v } }
@@ -104,11 +107,13 @@ function Assign($d, $prefix) {
   $Map[$d] = $n }
 foreach ($d in $Claude) { Assign $d 'claude' }
 foreach ($d in $Codex) { Assign $d 'codex' }
+foreach ($d in $Kiro) { Assign $d 'kiro' }
 
 if ($List) {
   Say 'system: windows'
   foreach ($d in $Claude) { Say "claude  $($Map[$d])  $d" }
   foreach ($d in $Codex) { Say "codex   $($Map[$d])  $d" }
+  foreach ($d in $Kiro) { Say "kiro    $($Map[$d])  $d" }
   return }
 
 # ---------- JSON / text helpers ----------
@@ -125,6 +130,7 @@ function Remove-Skills($d) {
 if ($Uninstall) {
   foreach ($d in $Claude) { Say "uninstalling Claude: $d"; if ($DryRun) { continue }; Ab-Uninstall-Claude $d; Remove-Skills $d }
   foreach ($d in $Codex) { Say "uninstalling Codex: $d"; if ($DryRun) { continue }; Ab-Uninstall-Codex $d; Remove-Skills $d }
+  foreach ($d in $Kiro) { Say "uninstalling Kiro: $d"; if ($DryRun) { continue }; Ab-Uninstall-Kiro $d; Remove-Skills $d }
   Say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; return }
 
 
@@ -150,6 +156,9 @@ if ($Check) {
       $a = @((Join-Path $Src 'scripts\codex-trust-hooks'), $d, '--check'); if ($py.Name -like 'py*') { $a = @('-3') + $a }
       $out = & $py.Source @a 2>&1; if ($LASTEXITCODE -eq 0) { Chk-Ok "Codex   $n  hooks approved" } else { Chk-Bad "Codex   $n  $(@($out | Where-Object { $_ -match 'untrusted' }).Count) hook(s) not approved: reinstall or run /hooks" } }
     if ((Read-Text (Join-Path $d 'skills\agent-bridge\SKILL.md')) -eq $skillText) { Chk-Ok "Codex   $n  skill up to date" } else { Chk-Bad "Codex   $n  skill missing or outdated" } }
+  foreach ($d in $Kiro) { $n = $Map[$d]; $ag = Join-Path $d 'steering\AGENTS.md'
+    if ((Read-Text $ag) -match 'BRIDGE-BEGIN') { Chk-Ok "Kiro    $n  steering" } else { Chk-Bad "Kiro    $n  steering missing" }
+    if ((Read-Text (Join-Path $d 'steering\agent-bridge.md')) -eq (Read-Text (Join-Path $Src 'SKILL.md'))) { Chk-Ok "Kiro    $n  skill up to date" } else { Chk-Bad "Kiro    $n  skill missing or outdated" } }
   Say ''; if ($script:bad -eq 0) { Ui-Info 'everything looks fine'; return } else { Ui-W "  ! $($script:bad) problem(s): run .\install.ps1 to repair" 'Yellow'; exit 1 } }
 
 if (-not $List -and -not $Uninstall) { Ui-Banner }
@@ -220,10 +229,10 @@ function Menu-Screen($n, $keys) { $script:Fast = $true; Clear-Host; Ui-Banner; U
 function Info-Wait { while ($true) { $k = [Console]::ReadKey($true); if ($k.Key -eq 'Enter') { return $false }; if ($k.KeyChar -eq 'b' -or $k.KeyChar -eq 'B') { return $true } } }
 if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
   # accounts as detected (information only); packages are the only selectable step
-  $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }
+  $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }; foreach ($d in $Kiro) { $acc += [pscustomobject]@{ Kind = 'kiro'; Dir = $d } }
   $pk = New-Object System.Collections.ArrayList
   [void]$pk.Add([pscustomobject]@{ Label = 'all'; Sub = 'select every package'; On = $false; Feat = $false })
-  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex sessions that talk to each other'; On = $true; Feat = $true })
+  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex + Kiro CLI sessions that talk to each other'; On = $true; Feat = $true })
   foreach ($x in $SkList) { [void]$pk.Add([pscustomobject]@{ Label = $x.Name; Sub = $x.Desc; On = $false; Feat = $false }) }
   $step = 1
   while ($true) {
@@ -255,7 +264,7 @@ if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [C
 
 # ---------- install ----------
 Ui-H 'Installing'
-$script:Steps = $(if ($PkgAb) { 1 } else { 0 }) + $Claude.Count + $Codex.Count
+$script:Steps = $(if ($PkgAb) { 1 } else { 0 }) + $Claude.Count + $Codex.Count + $Kiro.Count
 function Install-Skills($d) {
   foreach ($n in $SelSkills) {
     $from = Join-Path $RepoRoot $n; if (-not (Test-Path (Join-Path $from 'SKILL.md'))) { continue }
@@ -272,10 +281,13 @@ foreach ($d in $Codex) { $n = $Map[$d]
   Step ("Codex   {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
     if ($PkgAb) { Ab-Install-Codex $d $n }
     Install-Skills $d } }
-if ($Claude.Count + $Codex.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR.' }
+foreach ($d in $Kiro) { $n = $Map[$d]
+  Step ("Kiro    {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
+    if ($PkgAb) { Ab-Install-Kiro $d $n }; Install-Skills $d } }
+if ($Claude.Count + $Codex.Count + $Kiro.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR / -KiroDir DIR.' }
 if ($DryRun) { Say ''; Say 'dry-run finished: nothing was written.'; return }
-$msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count) account(s) configured" }
+$msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count + $Kiro.Count) account(s) configured" }
 $sum = @($msg); if ($SelSkills.Count -gt 0) { $sum += "$($S.ok) skills: $($SelSkills -join ' ')" }
-$sum += @('', 'Next steps', '  1. Restart open Claude/Codex sessions')
+$sum += @('', 'Next steps', '  1. Restart open Claude/Codex/Kiro sessions')
 if ($PkgAb) { $sum += Ab-Next-Steps }
 Ui-Box 'Done' $sum

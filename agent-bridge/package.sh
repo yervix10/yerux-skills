@@ -70,6 +70,12 @@ in_codex_ab() { local d="$1" n f; n="$(get_name "$d")"
   touch "$d/AGENTS.md"; strip_block "$d/AGENTS.md"; agents_block "$n" >> "$d/AGENTS.md"; }
 ab_install_claude() { in_claude_ab "$1"; }
 ab_install_codex() { in_codex_ab "$1"; }
+in_kiro_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
+  mkdir -p "$d/steering" "$BR/inbox/$n"
+  [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$d/steering/agent-bridge.md"
+  touch "$d/steering/AGENTS.md"; strip_block "$d/steering/AGENTS.md"; agents_block "$n" >> "$d/steering/AGENTS.md"
+  return 0; }
+ab_install_kiro() { in_kiro_ab "$1"; }
 ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && unwrap_statusline "$d/settings.json" "$(get_name "$d")"
   [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }
@@ -77,6 +83,8 @@ ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
 ab_un_codex() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/hooks.json"; command -v python3 >/dev/null 2>&1 && python3 "$SRC/scripts/codex-trust-hooks" "$d" --prune >/dev/null 2>&1
   rm -rf "$d/skills/agent-bridge" "$d/prompts/admin.md" "$d/prompts/agent.md" "$d/prompts/dashboard.md"; strip_block "$d/AGENTS.md"; return 0; }
+ab_un_kiro() { local d="$1"; [ "$DRY" = 1 ] && return 0
+  rm -f "$d/steering/agent-bridge.md"; strip_block "$d/steering/AGENTS.md"; return 0; }
 ab_next_steps() { # appends to the global "lines" array
   lines+=("  2. Codex: hooks are pre-approved (if ${CYN}/hooks${RST} still lists one, approve it)" "  3. Try ${CYN}/admin${RST}  then  ${CYN}/agent ping <name>${RST}")
   [ $OPT_PATH = 1 ] && case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) lines+=("" "${YEL}!${RST} add ~/.local/bin to your PATH to use 'agent' and 'admin'");; esac

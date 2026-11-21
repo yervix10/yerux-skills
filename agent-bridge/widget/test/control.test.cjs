@@ -25,3 +25,11 @@ test('exige identidad admin coincidente y bloquea al propio admin como objetivo'
   assert.match(authorizeAdminAction({...base,target:{role:'admin'}}),/reservada a workers/);
   assert.match(authorizeAdminAction({...base,recordedAdmin:'codex-1'}),/no coincide/);
 });
+
+test('Kiro controla modelos anunciados, esfuerzo y compactación por handoff', () => {
+  const kiro = { role: 'worker', kind: 'kiro' };
+  assert.equal(validateControl(kiro, { action: 'model', value: 'claude-sonnet-4.5' }, ['claude-sonnet-4.5']), '');
+  assert.match(validateControl(kiro, { action: 'model', value: 'not-listed' }, ['auto']), /Modelo/);
+  assert.equal(validateControl(kiro, { action: 'effort', value: 'high' }), '');
+  assert.equal(validateControl(kiro, { action: 'compact' }), '');
+});

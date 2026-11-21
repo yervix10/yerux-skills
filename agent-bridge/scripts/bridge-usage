@@ -3,9 +3,10 @@
 # ("-" = unknown; *_reset are epoch seconds; month = a provider window longer than a week, e.g. Codex free/go plans). Codex: read from its latest session file (the same data its UI shows). Claude: from its worker's live log.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
-now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""
-case "$(basename "$dir")" in
-  .codex*)
+now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""; credits=""
+kind="$("$(dirname "$0")/bridge-provider" "$dir" 2>/dev/null || true)"
+case "$kind" in
+  codex)
     f="$(find "$dir/sessions" -name '*.jsonl' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
     if [ -n "$f" ]; then
       at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
@@ -25,7 +26,7 @@ case "$(basename "$dir")" in
       rm -f "${TMPDIR:-/tmp}/bu.$$"; ctx="$(printf '%s' "$row" | cut -f1)"; h5="$(printf '%s' "$row" | cut -f2)"; h5r="$(printf '%s' "$row" | cut -f3)"
       wk="$(printf '%s' "$row" | cut -f4)"; wkr="$(printf '%s' "$row" | cut -f5)"; mo="$(printf '%s' "$row" | cut -f6)"; mor="$(printf '%s' "$row" | cut -f7)"
     fi;;
-  .claude*)
+  claude)
     # candidates, newest wins: (a) JSON saved by bridge-statusline, (b) the status line cache some setups keep per session
     # (~/.cache/lordos/claude/<session>.json, matched by its transcript path), (c) the worker's live stream-json log
     f="$B/logs/$name.live"; [ "$B/logs/$name.probe" -nt "$f" ] && f="$B/logs/$name.probe"   # probe = `agent refresh`
@@ -45,6 +46,18 @@ case "$(basename "$dir")" in
       for v in model cwd h5 wk h5r wkr used win; do [ "${!v}" = - ] && printf -v "$v" ''; done
       [ -n "$used" ] && [ -n "$win" ] && ctx=$((used * 100 / win))
     fi;;
+  kiro)
+    sess_file=""; sess="$(find "$B/sessions/$name" -maxdepth 1 -type f ! -name '*.cwd' -print 2>/dev/null | head -1)"; sess="$(cat "$sess" 2>/dev/null)"
+    if [ -n "$sess" ]; then sess_file="$(find "$dir/sessions" -path "*/$sess/session.json" -type f 2>/dev/null | head -1)"; fi
+    if [ -n "$sess_file" ]; then
+      root="${sess_file%/session.json}"; f="$root/messages.jsonl"
+      at="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)"
+      cwd="$(jq -r '.workspacePaths[0] // .rootPaths[0] // empty' "$sess_file" 2>/dev/null)"
+      model="$(jq -r '.modelId // empty' "$sess_file" 2>/dev/null)"
+      eff="$(cat "$B/effort/$name" 2>/dev/null)"
+      ctx="$(jq -r 'select(.payload.type=="session_metadata" and .payload.key=="contextUsage")|.payload.value.usagePercentage // empty' "$f" 2>/dev/null | tail -1 | awk '{printf "%d", $1+0.5}')"
+      credits="$(jq -sr '[.[]|select(.payload.type=="usage_summary")|.payload.promptTurnSummaries[]?|select(.unit=="credit")|.usage|select(type=="number")]|add // empty' "$f" 2>/dev/null)"
+    fi;;
 esac
 for v in model cwd ctx h5 wk at eff h5r wkr mo mor; do [ "${!v}" = - ] && printf -v "$v" ''; done
 proj=""; br=""; if [ "$cwd" = "$HOME" ]; then proj="~"; elif [ -n "$cwd" ] && [ -d "$cwd" ]; then proj="$(basename "$cwd")"; br="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)"; elif [ -n "$cwd" ]; then proj="$(basename "$cwd")"; fi
@@ -53,4 +66,4 @@ age=""; [ -n "$at" ] && age=$((now - at))
 for w in h5 wk mo; do r="${w}r"; [ "$w" = mo ] && r=mor; rv="${!r}"
   if [ -n "$rv" ] && [ "$rv" -le "$now" ] 2>/dev/null; then printf -v "$w" 0; printf -v "$r" ''; fi; done
 # "-" stands for unknown so tab-splitting (which collapses empty fields) keeps the columns aligned
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}" "${h5r:--}" "${wkr:--}" "${mo:--}" "${mor:--}"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${model:--}" "${proj:--}" "${br:--}" "${ctx:--}" "${h5:--}" "${wk:--}" "${age:--}" "${eff:--}" "${h5r:--}" "${wkr:--}" "${mo:--}" "${mor:--}" "${credits:--}"

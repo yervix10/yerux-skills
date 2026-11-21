@@ -2,7 +2,7 @@
 
 const choices = {
   role: ['admin', 'worker'],
-  kind: ['claude', 'codex'],
+  kind: ['claude', 'codex', 'kiro'],
   state: ['admin', 'idle', 'working', 'limited', 'stuck', 'off', 'unknown'],
   tier: ['', 'heavy', 'normal', 'light', 'skip'],
 };
@@ -46,6 +46,10 @@ function parseDashboard(source) {
     const normalized = Object.fromEntries(
       [...textFields, ...Object.keys(choices), 'context', 'data_age_s'].map((key) => [key, agent[key]]),
     );
+    if (agent.credit_used !== undefined) {
+      if (!(agent.credit_used === null || (Number.isFinite(agent.credit_used) && agent.credit_used >= 0))) throw new TypeError(`Créditos inválidos en la posición ${index}`);
+      normalized.credit_used = agent.credit_used;
+    }
     for (const key of periods) {
       const { used, resets_at } = agent[key];
       normalized[key] = { used: used === null ? null : Math.min(used, 100), resets_at };

@@ -146,6 +146,21 @@ function parseCodex(line) {
   } else if (o.type === 'event_msg' && ['task_started','task_complete'].includes(p.type)) out.push({ ts, role: p.type === 'task_started' ? 'system' : 'result', text: trunc(p.message || (p.type === 'task_started' ? 'Tarea iniciada' : 'Tarea completada')) });
   return out;
 }
+function parseKiro(line) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const ts = o.timestamp || o.data?.update?._meta?.kiro?.timestamp || new Date().toISOString();
+  const out = []; const p = o.payload || {}; const u = o.data?.update || {};
+  if (o.type === 'sessionUpdate') {
+    if (u.sessionUpdate === 'agent_message_chunk' && u.content?.text) out.push({ ts, role: 'assistant', text: trunc(u.content.text) });
+    else if (u.sessionUpdate === 'tool_call') out.push({ ts, role: 'tool', tool: trunc(u.toolCall?.title || u.toolCall?.name || 'Kiro tool'), text: trunc(printable(u.toolCall?.rawInput || u.toolCall?.input || '')) });
+    else if (u.sessionUpdate === 'tool_call_update') out.push({ ts, role: 'tool_result', tool: trunc(u.toolCallId || 'Kiro tool'), text: trunc(printable(u.content || u.rawOutput || u.status || '')) });
+  } else if (p.type === 'user') { const order = cleanOrder(p.content); if (order) out.push({ ts, role: 'order', text: trunc(order) }); }
+  else if (p.type === 'assistant' && p.content) out.push({ ts, role: 'assistant', text: trunc(textValue(p.content) || printable(p.content)) });
+  else if (p.type === 'tool_use' || p.type === 'tool_call') out.push({ ts, role: 'tool', tool: trunc(p.name || p.toolName || 'Kiro tool'), text: trunc(printable(p.input || p.arguments || {})) });
+  else if (p.type === 'tool_result' || p.type === 'tool_call_update') out.push({ ts, role: 'tool_result', tool: trunc(p.name || p.toolName || 'Kiro tool'), text: trunc(printable(p.content || p.output || p.result || '')) });
+  else if (o.type === 'runFinished' && o.data?.finalText) out.push({ ts, role: 'result', text: trunc(o.data.finalText) });
+  return out;
+}
 function tail(file, maxBytes = 1_000_000) {
   let fd;
   try {
@@ -184,7 +199,7 @@ function feed(name, opts = {}) {
   const map=path.join(root,'names.conf'); const config=fs.readFileSync(map,'utf8').split(/\r?\n/).find(x=>x.split('=')[1]===name)?.split('=')[0];
   const readFiles=(dir, parser, identifiers=[]) => { if(!dir||!fs.existsSync(dir))return; const files=[]; const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(dir); files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs); const selected=identifiers.length?files.filter(f=>identifiers.some(id=>path.basename(f).includes(id))).slice(0,3):files.slice(0,3); for(const f of selected)for(const l of tail(f))events.push(...parser(l)); };
   const sessions=path.join(root,'sessions',name); const ids=[];try{for(const f of fs.readdirSync(sessions).sort((a,b)=>fs.statSync(path.join(sessions,b)).mtimeMs-fs.statSync(path.join(sessions,a)).mtimeMs)){const id=fs.readFileSync(path.join(sessions,f),'utf8').trim();if(id)ids.push(id);}}catch{}
-  const kind=path.basename(config||'').startsWith('.codex')?'codex':'claude';
+  const kind=(()=>{try{return require('child_process').execFileSync(path.join(__dirname,'bridge-provider'),[config||''],{encoding:'utf8'}).trim();}catch{return path.basename(config||'').startsWith('.codex')?'codex':'claude';}})();
   if (isAdmin && kind === 'claude') {
     let usage = {};
     try { usage = JSON.parse(fs.readFileSync(path.join(root, 'usage', `${name}.json`), 'utf8')); } catch {}
@@ -192,6 +207,12 @@ function feed(name, opts = {}) {
       events.push(...tailUseful(usage.transcript_path, parseAdminClaude, limit));
     }
   } else if(kind==='claude') { const files=[]; const projects=path.join(config||'', 'projects'); const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name.endsWith('.jsonl'))files.push(f);}}catch{}};walk(projects); const chosen=ids.length?ids.map(id=>files.find(x=>path.basename(x).includes(id))).filter(Boolean):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1); for(const f of chosen)for(const l of tail(f))events.push(...parseClaude(l)); }
+  else if(kind==='kiro') {
+    const saved=path.join(root,'sessions',name); let sessionId=''; try { for(const f of fs.readdirSync(saved).map(x=>path.join(saved,x)).filter(f=>!f.endsWith('.cwd'))){sessionId=fs.readFileSync(f,'utf8').trim();if(sessionId)break;} } catch {}
+    const files=[]; const walk=d=>{try{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())walk(f);else if(e.name==='messages.jsonl')files.push(f);}}catch{}}; walk(path.join(config||'', 'sessions'));
+    const chosen=sessionId?files.filter(f=>f.includes(`${sessionId}/`)):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1);
+    for(const f of chosen)for(const l of tail(f))events.push(...parseKiro(l));
+  }
   else { const homes=[...new Set([path.join(os.homedir(),'.codex'), ...fs.readdirSync(os.homedir()).filter(x=>x.startsWith('.codex')).map(x=>path.join(os.homedir(),x)),config||''])]; for(const h of homes)readFiles(path.join(h,'sessions'),parseCodex,ids); }
   try { const log=tail(path.join(root,'logs',`${name}.log`),200000).slice(-80); for(const l of log){const m=l.match(/^\[([^\]]+)\] (.*)$/);if(m)events.push({ts:m[1],role:/order from/.test(m[2])?'order':'system',text:trunc(m[2])});} } catch {}
   if (!isAdmin) {
@@ -212,4 +233,4 @@ function feed(name, opts = {}) {
   return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,{...opts,limit})};
 }
 if(require.main===module){const [name,...args]=process.argv.slice(2);const li=args.indexOf('--limit');const limit=li>=0?Number(args[li+1]):undefined;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
-module.exports={feed,parseClaude,parseAdminClaude,parseCodex,redact,tail,tailUseful,selectEvents,cleanOrder,printable};
+module.exports={feed,parseClaude,parseAdminClaude,parseCodex,parseKiro,redact,tail,tailUseful,selectEvents,cleanOrder,printable};

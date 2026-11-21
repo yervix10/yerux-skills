@@ -9,18 +9,20 @@ It downloads the project to `~/.agent-bridge` and opens a setup menu (accounts, 
 Without a terminal it installs everything detected. Options after `bash -s --`: `--yes`, `--uninstall`, `--list`, `--dry-run`.
 Pin a version with `AGENT_BRIDGE_REF=<tag>`. On Windows pass options with `$env:AGENT_BRIDGE_ARGS='-Yes'`.
 
-Connects Claude Code and Codex sessions from different accounts on the same machine.
+Connects Claude Code, Codex, and Kiro CLI sessions from different accounts on the same machine.
 
 The desktop widget shows a read-only activity feed when you select an agent card. It refreshes while open and includes the recent admin order, assistant messages, tool actions, and result. From the CLI, use `agent feed <name> [--json] [--limit N] [--since TS]`. The limit applies to the newest events after timestamp sorting; incomplete trailing JSONL records and runner prompt wrappers are ignored. Secret-like values are redacted and event text is capped at 2,000 characters.
 
 The detail-panel capture can be refreshed from the widget folder with `./node_modules/.bin/electron . --capture --capture-feed`; it selects a current dashboard agent and writes `docs/screenshot.png`.
 
-The agent detail panel renders safe lightweight Markdown, code blocks with copy buttons, tool activity, and newest-first live updates. Start the widget from the admin session to enable worker controls; the IPC checks the dashboard agent name and admin marker, then the CLI rechecks admin identity. Model and effort changes take effect on the next order. Claude offers Sonnet and Haiku; Opus requires explicit confirmation. Codex model choices come from that account's visible CLI model list. The interactive admin session's controls are disabled; use `/model` or `/compact` in its terminal. **Compact now** confirms first and queues a worker compaction immediately when idle, or before its next order when busy. The CLI equivalent is `agent compact <worker>` (admin only).
+The agent detail panel renders safe lightweight Markdown, code blocks with copy buttons, tool activity, and newest-first live updates. Start the widget from the admin session to enable worker controls; the IPC checks the dashboard agent name and admin marker, then the CLI rechecks admin identity. Model and effort changes take effect on the next order. Claude offers Sonnet and Haiku; Opus requires explicit confirmation. Codex and Kiro model choices come from their CLI model lists. Kiro session context and consumed credits appear when available; Kiro exposes no remaining account-quota measurement, so capacity assigns a fixed normal tier. The interactive admin session's controls are disabled; use `/model` or `/compact` in its terminal. **Compact now** confirms first and queues a worker compaction immediately when idle, or before its next order when busy. The CLI equivalent is `agent compact <worker>` (admin only).
 
     ./install.sh --list      # detected accounts
     ./install.sh --dry-run
     ./install.sh             # install
     ./install.sh --uninstall
+
+Kiro CLI is detected from `kiro-cli` plus `~/.kiro` (or an existing session store). It receives the automatic name `kiro-N`; `./install.sh --kiro-dir DIR` can select another config directory. Instructions and the skill are installed as `steering/AGENTS.md` and `steering/agent-bridge.md`; Kiro supports global steering in `~/.kiro/steering/`. The runner uses `kiro-cli chat --no-interactive --trust-all-tools --trust-workspace`, `--resume-id` for the saved per-worktree session, and a handoff summary when context compaction is needed. Set `BRIDGE_BYPASS=0` (or `--safe`) to restrict tool trust.
 
 ## Headless workers
 
@@ -39,7 +41,7 @@ The installer wraps each Claude account's status line by default so the dashboar
 On setups that keep a per-session status line cache (`~/.cache/lordos/claude/*.json`) the interactive agents are read from it automatically.
 `agent dashboard` shows every agent live, like the status line: `model | project | branch | ctx % | 5h % (↻ time to reset) | sem % (↻) | mes % (↻)` + its state (`mes` only when the provider has a monthly window).
 Runners compact their context before an order once it reaches `COMPACT_AT` % (default 40, `0` disables; set in `~/.claude-bridge/config` or `BRIDGE_COMPACT_AT`).
-Codex data comes from its latest session file; Claude data from the worker's live log, or from the real status line JSON if you install
+Codex data comes from its latest session file; Kiro data comes from its session history; Claude data from the worker's live log, or from the real status line JSON if you install
 with `./install.sh --statusline` (wraps the account's status line, which keeps looking the same; `--uninstall` restores it). Desktop notifications on alerts/limits/errors (`BRIDGE_NOTIFY=0` to mute).
 `BRIDGE_REASSIGN=1` (or `REASSIGN=1` in config): when a worker hits a usage limit its order goes to an idle worker.
 `./install.sh --safe` / `BRIDGE_BYPASS=safe`: workers can edit files but Claude cannot run arbitrary commands unprompted.
@@ -56,7 +58,11 @@ Accounts inside WSL are installed by running `./install.sh` from WSL.
 
 ## Options (Linux/macOS/WSL)
 
-    ./install.sh --claude-dir DIR --codex-dir DIR    # accounts in custom locations
+    ./install.sh --claude-dir DIR --codex-dir DIR --kiro-dir DIR  # accounts in custom locations
     ./install.sh --no-trust                          # do not pre-approve the hooks in Codex
     ./install.sh --name DIR=NAME                     # choose a name
-Accounts are also found via CLAUDE_CONFIG_DIR / CODEX_HOME in your environment and shell aliases.
+Accounts are also found via CLAUDE_CONFIG_DIR / CODEX_HOME / KIRO_HOME in your environment and shell aliases.
+
+## Adding a provider
+
+`bridge-provider` resolves an explicit `provider` file first, then the standard `.claude*`, `.codex*`, or `.kiro*` config prefix. Implement command/resume/model/effort/compact behavior in `bridge-runner`, optional usage in `bridge-usage`, feed parsing in `bridge-feed`, validation in `agent`, widget capabilities and account steering in the installers. Keep unavailable quotas optional. This is the short adapter checklist for a future OpenCode provider.

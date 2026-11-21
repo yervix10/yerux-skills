@@ -4,7 +4,7 @@
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-runner <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"
 [ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
-case "$(basename "$dir")" in .claude*) kind=claude;; .codex*) kind=codex;; *) echo "unknown type: $dir" >&2; exit 1;; esac
+kind="$("$(dirname "$0")/bridge-provider" "$dir")" || { echo "unknown type: $dir" >&2; exit 1; }
 mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/notes" "$B/runs"
 LOG="$B/logs/$name.log"; NOTES="$B/notes/$name.md"
 # portability: timeout/gtimeout may be missing (macOS); uuid via python3 or uuidgen
@@ -33,6 +33,8 @@ sw() { printf 'status=%s\nsince=%s\nbeat=%s\norder=%s\nlast_end=%s\nlast_rc=%s\n
 act() { [ -s "$LIVE" ] || return 0
   if [ "$kind" = codex ]; then
     S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="item.started" or .type=="item.completed")|.item|select(.type!="agent_message" and .type!="reasoning")|"\(.type) \((.command // .path // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = kiro ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="sessionUpdate")|.data.update as $u|select($u.sessionUpdate=="tool_call")|"\($u.title // $u.toolCall.name // "herramienta") \(($u.toolCall.rawInput // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   else
   S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="assistant")|.message.content[]?|select(.type=="tool_use")|"\(.name) \((.input.command // .input.file_path // .input.pattern // .input.description // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   fi
@@ -58,6 +60,10 @@ ctx_now() { local used win
     used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0)+(.cache_creation_input_tokens // 0))' "$LIVE" 2>/dev/null | tail -1)"
     win="$(jq -r 'select(.type=="result")|.modelUsage|to_entries[0].value.contextWindow // empty' "$LIVE" 2>/dev/null | tail -1)"
     [ -n "$used" ] && [ -n "$win" ] && [ "$win" -gt 0 ] 2>/dev/null && echo $((used * 100 / win))
+  elif [ "$kind" = kiro ]; then
+    local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
+    f="$(find "$dir/sessions" -path "*/$sess/messages.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
+    jq -r 'select(.payload.type=="session_metadata" and .payload.key=="contextUsage")|.payload.value.usagePercentage // empty' "$f" 2>/dev/null | tail -1 | awk '{printf "%d\n", $1+0.5}'
   else # Codex: read the context of THIS runner's own session (its thread id is in $sf), not the newest session of the account
     local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
     f="$(find "$dir/sessions" -name "*$sess*.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
@@ -72,6 +78,15 @@ maybe_compact() { local force="${1:-0}" c rc=0 out hf; [ -f "$sf" ] || return 0
   if [ "$kind" = claude ]; then
     ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to 900 claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_PERM[@]}" --resume "$(cat "$sf")" "/compact" ) > "$B/logs/$name.compact" 2>&1 < /dev/null & supervise $! || rc=$?
     if grep -q compact_boundary "$B/logs/$name.compact" 2>/dev/null; then log "compacted (was ${c}%)"; else log "compaction failed (rc=$rc), continuing without it"; fi
+  elif [ "$kind" = kiro ]; then
+    out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
+    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 kiro-cli chat --no-interactive --trust-all-tools --trust-workspace --output-format stream-json "${MODEL_ARGS[@]}" --resume-id "$(cat "$sf")" "Your context is nearly full. Write a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Return only the handoff; do not run tools." ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
+    jq -r 'select(.type=="runFinished")|.data.finalText // empty' "$B/logs/$name.compact" 2>/dev/null | tail -1 > "$out"
+    if [ "$rc" = 0 ] && [ -s "$out" ]; then cp "$out" "$hf"; rm -f "$sf"; prompt="$prompt
+
+[Handoff summary from the previous Kiro session:]
+$(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed (rc=$rc), continuing without compaction"; fi
+    rm -f "$out"
   else
     out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
     ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to 900 codex exec resume --json "${MODEL_ARGS[@]}" "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "Your context is nearly full and this conversation is about to be replaced by a fresh one. Reply ONLY with a concise handoff (max 40 lines): your project and worktree, branch, what is done (commits), what is in progress, decisions and gotchas, exact next steps. Do not run any tools." < /dev/null ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
@@ -102,8 +117,8 @@ manual_compact() {
   fi
   [ -d "$cwd" ] || { log "manual compaction unavailable: saved project directory is missing or unknown"; return 1; }
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"; eff="$(cat "$B/effort/$name" 2>/dev/null)"
-  if [ -n "$mdl" ]; then if [ "$kind" = claude ]; then MODEL_ARGS=(--model "$mdl"); else MODEL_ARGS=(-m "$mdl"); fi; fi
-  if [ -n "$eff" ]; then if [ "$kind" = claude ]; then MODEL_ARGS+=(--effort "$eff"); else MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\""); fi; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro) MODEL_ARGS=(--model "$mdl");; esac; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   log "manual compaction requested"; maybe_compact 1
   return 0
 }
@@ -170,9 +185,9 @@ Order:
 $body"
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
-  if [ -n "$mdl" ]; then if [ "$kind" = claude ]; then MODEL_ARGS=(--model "$mdl"); else MODEL_ARGS=(-m "$mdl"); fi; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude|kiro) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; esac; fi
   eff="$(cat "$B/effort/$name" 2>/dev/null)"   # reasoning effort, also set by the admin (`agent effort`)
-  if [ -n "$eff" ]; then if [ "$kind" = claude ]; then MODEL_ARGS+=(--effort "$eff"); else MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\""); fi; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   maybe_compact
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
   tmp="$(mktemp)"; rc=0
@@ -187,7 +202,7 @@ $body"
     jq -r 'select(.type=="result")|.result // empty' "$LIVE" 2>/dev/null > "$tmp"
     [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 2000 "$LIVE"; } > "$tmp" 2>/dev/null
     [ "$new" = 1 ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
-  else
+  elif [ "$kind" = codex ]; then
     out="$(mktemp)"; : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     if [ -f "$sf" ]; then
       ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume --json "${MODEL_ARGS[@]}" "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
@@ -199,6 +214,19 @@ $body"
     errs="$(jq -r '(select(.type=="error")|.message), (select(.type=="turn.failed")|.error.message)' "$LIVE" 2>/dev/null | tr '\n' ' ')"
     [ -n "$errs" ] && [ "$rc" = 0 ] && ! [ -s "$out" ] && rc=1
     cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || { printf '%s\n' "$errs"; cat "$LIVE.err"; } | tail -c 2000 > "$tmp"; rm -f "$out"
+  else
+    : > "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    session_args=(); [ -f "$sf" ] && session_args=(--resume-id "$(cat "$sf")")
+    trust_args=(--trust-all-tools); { [ "$BYPASS" = 0 ] || [ "$BYPASS" = safe ]; } && trust_args=(--trust-tools=fs_read,grep,glob,code,introspect)
+    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" kiro-cli chat --no-interactive --trust-workspace "${trust_args[@]}" --output-format stream-json "${MODEL_ARGS[@]}" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    status="$(jq -r 'select(.type=="runFinished")|.data.status // empty' "$LIVE" 2>/dev/null | tail -1)"
+    { [ -n "$status" ] && [ "$status" != success ]; } && [ "$rc" = 0 ] && rc=1
+    jq -r 'select(.type=="runFinished")|.data.finalText // empty' "$LIVE" 2>/dev/null | tail -1 > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
+    id="$( (cd "$cwd" && kiro-cli chat --list-sessions --format json 2>/dev/null) | jq -r '[..|objects|select(.sessionId? and .updatedAt?)]|sort_by(.updatedAt)|last.sessionId // empty' 2>/dev/null)"
+    [ -n "$id" ] || id="$(jq -r 'select(.type=="sessionUpdate")|.data.sessionId // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+    RESET_AT=""
   fi
   res="$(head -c 6000 "$tmp")"; rm -f "$tmp"
   verdict="$(classify "$rc" "$res")"

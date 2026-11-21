@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { feed, parseClaude, parseAdminClaude, parseCodex, redact, tail, tailUseful, selectEvents } = require('../../scripts/bridge-feed');
+const { feed, parseClaude, parseAdminClaude, parseCodex, parseKiro, redact, tail, tailUseful, selectEvents } = require('../../scripts/bridge-feed');
 const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
 test('parsea mensajes Claude, herramienta y resultado', () => {
   assert.equal(parseClaude(JSON.stringify({type:'user',timestamp:'2026-01-01T00:00:00Z',message:{content:[{type:'text',text:'hola'}]}}))[0].role,'order');
@@ -21,6 +21,14 @@ test('parsea formato Codex', () => {
   assert.equal(objectTool[0].text, '{"cmd":"pwd","args":["-P"]}');
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'message',role:'developer',content:[{text:'contexto'}]}})).length,0);
   assert.equal(parseCodex(JSON.stringify({type:'response_item',payload:{type:'custom_tool_call_output',name:'exec',output:'done'}}))[0].role,'tool_result');
+});
+test('parsea órdenes, texto, herramientas y respuesta final del stream Kiro', () => {
+  const fixture = path.join(__dirname, 'fixtures/kiro-session-anonymized.jsonl');
+  const events = tail(fixture).flatMap(parseKiro);
+  assert.deepEqual(events.map(({ role }) => role), ['order', 'assistant', 'tool', 'tool_result', 'result']);
+  assert.equal(events[0].text, 'Responde solo: ok');
+  assert.equal(events[2].tool, 'Read file');
+  assert.equal(events.at(-1).text, 'ok');
 });
 test('lee transcript anonimizado del admin y clasifica órdenes, reportes, conversación y ping', () => {
   const fixture = path.join(__dirname, 'fixtures/admin-transcript-anonymized.jsonl');

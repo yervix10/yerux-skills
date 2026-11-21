@@ -172,6 +172,14 @@ function accountHome(name) {
   const bridge = process.env.BRIDGE_DIR || path.join(require('node:os').homedir(), '.claude-bridge');
   try { return fs.readFileSync(path.join(bridge, 'names.conf'), 'utf8').split(/\r?\n/).find((line) => line.split('=')[1] === name)?.split('=')[0] || ''; } catch { return ''; }
 }
+function providerModels(kind, name, callback) {
+  const command = kind === 'kiro' ? (process.env.KIRO_CLI || path.join(require('node:os').homedir(), '.local', 'bin', 'kiro-cli')) : 'codex';
+  const args = kind === 'kiro' ? ['chat', '--list-models', '--format', 'json'] : ['debug', 'models'];
+  execFile(command, args, { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024,
+    env: { ...process.env, CODEX_HOME: kind === 'codex' ? (accountHome(name) || process.env.CODEX_HOME) : process.env.CODEX_HOME } }, (error, stdout) => {
+    try { const data = JSON.parse(stdout); callback(!error ? (kind === 'kiro' ? data.models.map((model) => model.model_id) : data.models.filter((model) => model.visibility !== 'hide').map((model) => model.slug)) : []); } catch { callback([]); }
+  });
+}
 
 function sessionIdentity() {
   if (process.env.BRIDGE_NAME) return process.env.BRIDGE_NAME;
@@ -331,21 +339,16 @@ async function createWidget() {
     const agent = targetAgent(event, name);
     if (!agent) return null;
     if (agent.kind === 'claude') return { model: modelOptions(agent.kind), effort: effortOptions(agent.kind), configuredModel: agent.set_model || 'default', configuredEffort: agent.set_effort || 'default', authorized: adminActionAllowed() };
-    if (agent.kind !== 'codex') return { model: [], effort: [], configuredModel: 'default', configuredEffort: 'default', authorized: adminActionAllowed() };
-    return new Promise((resolve) => execFile('codex', ['debug', 'models'], { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, CODEX_HOME: accountHome(agent.name) || process.env.CODEX_HOME } }, (error, stdout) => {
-      let models = [];
-      try { if (!error) models = JSON.parse(stdout).models.filter((m) => m.visibility !== 'hide').map((m) => m.slug); } catch {}
-      resolve({ model: modelOptions(agent.kind, models), effort: effortOptions(agent.kind), configuredModel: agent.set_model || 'default', configuredEffort: agent.set_effort || 'default', authorized: adminActionAllowed() });
-    }));
+    return new Promise((resolve) => providerModels(agent.kind, agent.name, (models) => resolve({ model: modelOptions(agent.kind, models), effort: effortOptions(agent.kind), configuredModel: agent.set_model || 'default', configuredEffort: agent.set_effort || 'default', authorized: adminActionAllowed() })));
   });
   ipcMain.handle('control:execute', async (event, request) => {
     if (!request || typeof request !== 'object') return { ok: false, message: 'Solicitud inválida' };
     const agent = targetAgent(event, request.name);
     if (!agent) return { ok: false, message: 'Agente no disponible en el dashboard' };
     try {
-      let codexModels = [];
-      if (agent.kind === 'codex' && request.action === 'model') codexModels = await new Promise((resolve) => execFile('codex', ['debug', 'models'], { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, CODEX_HOME: accountHome(agent.name) || process.env.CODEX_HOME } }, (_error, stdout) => { try { resolve(JSON.parse(stdout).models.filter(m => m.visibility !== 'hide').map(m => m.slug)); } catch { resolve([]); } }));
-      const validationError = validateControl(agent, request, codexModels);
+      let listedModels = [];
+      if (['codex', 'kiro'].includes(agent.kind) && request.action === 'model') listedModels = await new Promise((resolve) => providerModels(agent.kind, agent.name, resolve));
+      const validationError = validateControl(agent, request, listedModels);
       if (validationError) throw new Error(validationError);
       if (request.action === 'model') {
         return { ok: true, message: await runAdminAction(agent, ['model', agent.name, request.value]) };
