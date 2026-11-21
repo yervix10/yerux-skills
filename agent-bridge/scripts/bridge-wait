@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Blocks until a message arrives, prints it and exits (wakes the session if run in the background).
+B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="${BRIDGE_NAME:?BRIDGE_NAME not set}"
+mkdir -p "$B/inbox/$me"
+while ! compgen -G "$B/inbox/$me/*.msg" >/dev/null; do sleep 1; done
+sleep 0.3; exec "$(dirname "$0")/bridge-hook" --text

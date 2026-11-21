@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# agent ping <target> | agent <target> <message...> | agent list | agent inbox | agent listen | agent up/down/status/logs/reset
+D="$(dirname "$0")"; R="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"
+case "$1" in
+  ping) [ -n "$2" ] || { echo "usage: agent ping <target>" >&2; exit 1; }
+        "$D/bridge-send" "$2" "ping from $me ($(date +%T))" ;;
+  admin) shift; exec "$D/admin" "$@";;
+  up) shift; names=("$@"); [ "$1" = all ] && names=($(awk -F= '{print $2}' "$R/names.conf")); 
+      for n in "${names[@]}"; do [ "$n" = "$me" ] && continue
+        if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then echo "$n: already up"; continue; fi
+        mkdir -p "$R/runs" "$R/logs"; if command -v setsid >/dev/null 2>&1; then setsid nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & else nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & fi; echo $! > "$R/runs/$n.pid"; echo "$n: up (pid $!)"; done;;
+  down) shift; names=("$@"); [ "$1" = all ] && names=($(ls "$R/runs" 2>/dev/null | sed 's/\.pid$//'))
+      for n in "${names[@]}"; do p="$(cat "$R/runs/$n.pid" 2>/dev/null)"; [ -n "$p" ] && kill "$p" 2>/dev/null && echo "$n: stopped" || echo "$n: was not up"; rm -f "$R/runs/$n.pid"; done;;
+  status) for n in $(awk -F= '{print $2}' "$R/names.conf"); do if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then echo "$n: UP"; else echo "$n: -"; fi; done;;
+  logs) tail -n "${3:-30}" "$R/logs/$2.log";;
+  reset) rm -rf "$R/sessions/$2" && echo "memory of $2 cleared";;
+  list) "$D/bridge-send" --list ;;
+  inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
+  listen) exec "$D/bridge-wait" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent logs <name> | agent reset <name> | agent admin [who|release]" ;;
+  *) to="$1"; shift; "$D/bridge-send" "$to" "$@" ;;
+esac

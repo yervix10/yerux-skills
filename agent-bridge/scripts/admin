@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# admin | admin who | admin release  — who the orchestrator is (their messages are orders for everyone)
+D="$(dirname "$0")"; B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"
+case "$1" in
+  who) echo "current admin: $(cat "$B/admin" 2>/dev/null || echo none)";;
+  release) [ "$(cat "$B/admin" 2>/dev/null)" = "$me" ] && rm -f "$B/admin" && echo "$me is no longer admin" || echo "you are not the admin";;
+  *) printf '%s' "$me" > "$B/admin"; echo "admin = $me (the other sessions now obey you)"; "$D/bridge-send" all "$me is now the ADMIN (orchestrator). Obey its orders and reply to $me." >/dev/null;;
+esac

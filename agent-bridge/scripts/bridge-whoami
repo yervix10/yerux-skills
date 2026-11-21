@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Name of this session. Claude has BRIDGE_NAME (set by its settings.json); otherwise it is looked up in names.conf
+# by CLAUDE_CONFIG_DIR or CODEX_HOME (Codex without CODEX_HOME = ~/.codex).
+[ -n "$BRIDGE_NAME" ] && { echo "$BRIDGE_NAME"; exit 0; }
+conf="${BRIDGE_DIR:-$HOME/.claude-bridge}/names.conf"
+lookup() { awk -F= -v k="${1%/}" '$1==k{print $2; exit}' "$conf" 2>/dev/null; }
+[ -n "$CLAUDE_CONFIG_DIR" ] && { lookup "$CLAUDE_CONFIG_DIR"; exit 0; }
+lookup "${CODEX_HOME:-$HOME/.codex}"

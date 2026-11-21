@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# bridge-runner <name>: terminal-less worker. Waits for the admin's orders in its inbox, runs them with
+# `claude -p` / `codex exec` (with memory: resumes the conversation per working directory) and replies to the admin.
+B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-runner <name>}"
+dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"
+[ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
+case "$(basename "$dir")" in .claude*) kind=claude;; .codex*) kind=codex;; *) echo "unknown type: $dir" >&2; exit 1;; esac
+mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/notes" "$B/runs"
+LOG="$B/logs/$name.log"; NOTES="$B/notes/$name.md"
+# portability: timeout/gtimeout may be missing (macOS); uuid via python3 or uuidgen
+if command -v timeout >/dev/null 2>&1; then TO=timeout; elif command -v gtimeout >/dev/null 2>&1; then TO=gtimeout; else TO=""; fi
+run_to() { local t="$1"; shift; if [ -n "$TO" ]; then "$TO" "$t" "$@"; else "$@"; fi; }
+newuuid() { python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || uuidgen | tr 'A-Z' 'a-z'; }
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+trap 'log "runner stopped"; exit 0' TERM INT
+log "runner $name ($kind, $dir) started"
+TMO="${BRIDGE_TASK_TIMEOUT:-1800}"
+# Bypass mode (no permission prompts) by default so the admin's orders do not fail. BRIDGE_BYPASS=0 disables it.
+BYPASS="${BRIDGE_BYPASS:-$(sed -n 's/^BYPASS=//p' "$B/config" 2>/dev/null | head -1)}"; BYPASS="${BYPASS:-1}"
+CLAUDE_PERM=(); CODEX_PERM_NEW=(-s workspace-write); CODEX_PERM_RES=(-c sandbox_mode=\"workspace-write\")
+if [ "$BYPASS" = 1 ]; then CLAUDE_PERM=(--dangerously-skip-permissions); CODEX_PERM_NEW=(--dangerously-bypass-approvals-and-sandbox); CODEX_PERM_RES=(--dangerously-bypass-approvals-and-sandbox); fi
+log "bypass=$BYPASS"
+while true; do
+  f="$(ls "$B/inbox/$name"/*.msg 2>/dev/null | sort | head -1)"
+  [ -n "$f" ] || { sleep 1; continue; }
+  sleep 0.3
+  base="$(basename "$f" .msg)"; from="${base##*-de-}"
+  cwd="$(sed -n 's/^Cwd: //p' "$f" | head -1)"; [ -d "$cwd" ] || cwd="$HOME"
+  body="$(awk 'f{print} /^$/ && !f{f=1}' "$f")"
+  mv "$f" "$B/read/$name/"
+  if [ "$from" != "$(cat "$B/admin" 2>/dev/null)" ]; then log "ignored (not from the admin): from $from"; continue; fi
+  key="$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)"; sf="$B/sessions/$name/$key"
+  case "$body" in "--new"*) rm -f "$sf"; body="$(printf '%s' "$body" | sed '1s/^--new[[:space:]]*//')";; esac
+  prompt="You are worker '$name' in a team of coordinated sessions. The admin '$from' gives you this order. Carry it out with your tools and reply ONLY with the final result, briefly: your reply is sent to '$from' automatically.
+
+Order:
+$body"
+  log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
+  tmp="$(mktemp)"; rc=0
+  if [ "$kind" = claude ]; then
+    if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
+    else id="$(newuuid)"; args=(--session-id "$id"); new=1; fi
+    ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CLAUDE_CONFIG_DIR="$dir" run_to "$TMO" claude -p "${CLAUDE_PERM[@]}" "${args[@]}" "$prompt" ) > "$tmp" 2>&1 || rc=$?
+    [ "$new" = 1 ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+  else
+    out="$(mktemp)"
+    if [ -f "$sf" ]; then
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec resume "${CODEX_PERM_RES[@]}" --skip-git-repo-check -o "$out" "$(cat "$sf")" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 || rc=$?
+    else
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" CODEX_HOME="$dir" run_to "$TMO" codex exec --json --skip-git-repo-check "${CODEX_PERM_NEW[@]}" -o "$out" "$prompt" < /dev/null ) > "$tmp.log" 2>&1 || rc=$?
+      id="$(grep -o -m1 '"\(thread_id\|session_id\|conversation_id\)":"[^"]*"' "$tmp.log" | head -1 | cut -d'"' -f4)"
+      [ "$rc" = 0 ] && [ -n "$id" ] && echo "$id" > "$sf"
+    fi
+    cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || tail -c 2000 "$tmp.log" > "$tmp"; rm -f "$out" "$tmp.log"
+  fi
+  res="$(head -c 6000 "$tmp")"; rm -f "$tmp"
+  [ "$rc" = 0 ] || res="ERROR (code $rc): $res"
+  [ -n "$res" ] || res="(no output)"
+  BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$from" "$res" >/dev/null
+  echo "- $(date '+%F %T') from $from [$cwd] rc=$rc: $(printf '%s' "$body" | head -c 100 | tr '\n' ' ')" >> "$NOTES"
+  log "replied to $from (rc=$rc)"
+done
