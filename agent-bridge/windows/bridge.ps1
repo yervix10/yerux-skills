@@ -202,13 +202,18 @@ function Invoke-Agent($a) {
       if (-not $v) { Write-Error "usage: agent $what <worker> <$(if ($what -eq 'effort') { 'level' } else { 'model' })|default>"; return }
       function Set-One($file, $val, $label) {
         if ($val -eq 'default') { Remove-Item $file -Force -ErrorAction SilentlyContinue; Write-Output "${n}: $label back to its default (applies from its next order)"; return $true }
-        if ($label -eq 'effort' -and ((Split-Path $wdir -Leaf) -like '.cursor*' -or (Split-Path $wdir -Leaf) -like 'cursor*' -or (Split-Path $wdir -Leaf) -like '.qwen*' -or (Split-Path $wdir -Leaf) -like 'qwen*')) { Write-Error 'effort is not configurable for cursor/qwen workers (pick a model with the level built in)'; return $false }
+        if ($label -eq 'effort' -and ((Split-Path $wdir -Leaf) -like '.cursor*' -or (Split-Path $wdir -Leaf) -like 'cursor*' -or (Split-Path $wdir -Leaf) -like '.opencode*' -or (Split-Path $wdir -Leaf) -like 'opencode*')) { Write-Error 'effort is not configurable for cursor/opencode workers (pick a model with the level built in)'; return $false }
         if ($label -eq 'effort') {
           $levels = if ((Split-Path $wdir -Leaf) -like '.claude*' -or (Split-Path $wdir -Leaf) -like '.kiro*' -or (Split-Path $wdir -Leaf) -like '*antigravity*' -or (Split-Path $wdir -Leaf) -like '*agy*') { @('low', 'medium', 'high', 'xhigh', 'max') } else { @('none', 'minimal', 'low', 'medium', 'high', 'xhigh') }
           if ($levels -notcontains $val) { Write-Error "invalid effort: use one of $($levels -join ' '), or default"; return $false } }
         elseif ($val -notmatch '^[A-Za-z0-9._:/\[\]-]+$') { Write-Error 'invalid model name'; return $false }
         elseif ((Split-Path $wdir -Leaf) -like '.kiro*') { $listed = & (Get-Command kiro-cli -ErrorAction Stop).Source chat --list-models --format json 2>$null | ConvertFrom-Json
           if (-not ($listed.models | Where-Object { $_.model_id -eq $val })) { Write-Error 'unknown Kiro model; choose one from kiro-cli chat --list-models --format json'; return $false } }
+        elseif ((Split-Path $wdir -Leaf) -like '.opencode*' -or (Split-Path $wdir -Leaf) -like 'opencode*') {
+          if ($val -notmatch '/') { Write-Error 'OpenCode models are provider/model (see: opencode models)'; return $false }
+          if ($val -notmatch '(-free|:free)$' -and $env:BRIDGE_OPENCODE_PAID -ne '1') { Write-Error "$val is not a free model: OpenCode workers accept only *-free / *:free models (set BRIDGE_OPENCODE_PAID=1 to allow paid ones)"; return $false }
+          $listed = @(& (Get-Command opencode -ErrorAction Stop).Source models 2>$null | ForEach-Object { $_.Trim() })
+          if ($listed -notcontains $val) { Write-Error 'unknown OpenCode model; choose one from: opencode models'; return $false } }
         elseif ((Split-Path $wdir -Leaf) -like '.cursor*' -or (Split-Path $wdir -Leaf) -like 'cursor*') { $listed = @(& (Get-Command cursor-agent -ErrorAction Stop).Source models 2>$null | ForEach-Object { ($_ -split ' - ')[0].Trim() })
           if ($listed -notcontains $val) { Write-Error 'unknown Cursor model; choose one from: cursor-agent models'; return $false } }
         elseif ((Split-Path $wdir -Leaf) -like '*antigravity*' -or (Split-Path $wdir -Leaf) -like '*agy*') { $listed = @(& (Get-Command agy -ErrorAction Stop).Source models 2>$null | ForEach-Object { ($_ -split "`t")[0].Trim() })
@@ -227,8 +232,8 @@ function Invoke-Runner($name) {
   if (-not $dir) { Write-Error "unknown name: $name"; exit 1 }
   $leaf = Split-Path $dir -Leaf
   if (Test-Path (Join-Path $dir 'provider')) { $kind = (Read-Text (Join-Path $dir 'provider')).Trim() }
-  elseif ($leaf -like '.claude*') { $kind = 'claude' } elseif ($leaf -like '.codex*') { $kind = 'codex' } elseif ($leaf -like '.kiro*' -or $leaf -like 'kiro*') { $kind = 'kiro' } elseif ($leaf -like '*antigravity*' -or $leaf -like 'agy*' -or $leaf -like '.agy*') { $kind = 'antigravity' } elseif ($leaf -like '.cursor*' -or $leaf -like 'cursor*') { $kind = 'cursor' } elseif ($leaf -like '.qwen*' -or $leaf -like 'qwen*') { $kind = 'qwen' } else { Write-Error "unknown type: $dir"; exit 1 }
-  if ($kind -notin @('claude','codex','kiro','antigravity','cursor','qwen')) { Write-Error "unknown provider: $kind"; exit 1 }
+  elseif ($leaf -like '.claude*') { $kind = 'claude' } elseif ($leaf -like '.codex*') { $kind = 'codex' } elseif ($leaf -like '.kiro*' -or $leaf -like 'kiro*') { $kind = 'kiro' } elseif ($leaf -like '*antigravity*' -or $leaf -like 'agy*' -or $leaf -like '.agy*') { $kind = 'antigravity' } elseif ($leaf -like '.cursor*' -or $leaf -like 'cursor*') { $kind = 'cursor' } elseif ($leaf -like '.opencode*' -or $leaf -like 'opencode*') { $kind = 'opencode' } elseif ($leaf -like '.copilot*' -or $leaf -like 'copilot*') { $kind = 'copilot' } else { Write-Error "unknown type: $dir"; exit 1 }
+  if ($kind -notin @('claude','codex','kiro','antigravity','cursor','opencode','copilot')) { Write-Error "unknown provider: $kind"; exit 1 }
   foreach ($d in @("inbox\$name", "read\$name", 'logs', "sessions\$name", 'notes', 'runs')) { Ensure-Dir (Join-Path $B $d) }
   $logf = Join-Path $B "logs\$name.log"; $notes = Join-Path $B "notes\$name.md"
   function Log($m) { Add-Content -Path $logf -Value "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) $m" -Encoding UTF8 }
@@ -295,11 +300,13 @@ function Invoke-Runner($name) {
       if ($e.type -eq 'result') { $o.result = [string]$e.result; $o.isErr = [bool]$e.is_error }
       elseif ($e.type -eq 'rate_limit_event' -and $e.rate_limit_info.status -eq 'rejected') { $o.resetAt = [int64]$e.rate_limit_info.resetsAt } }
     return $o }
-  function Beat { if ((Get-Epoch) - $st.beatAt -ge 5) { if ($st.status -eq 'working' -and $kind -in @('claude','kiro','antigravity','cursor','qwen')) { Update-Activity }; Write-State } }
+  function Beat { if ((Get-Epoch) - $st.beatAt -ge 5) { if ($st.status -eq 'working' -and $kind -in @('claude','kiro','antigravity','cursor','opencode','copilot')) { Update-Activity }; Write-State } }
   function Classify($rc, $text) {
     $low = $text.ToLower()
     if ($rc -eq 124) { return 'timeout' }
+    if ($low -match 'not scoped to a workspace|access denied by policy|authentication required') { return 'api' }
     if ($rc -ne 0) {
+      if ($low -match 'free-models-per-day|free usage limit reached|tokens per minute|hit your usage limit') { return 'limit' }
       if ($low -match 'usage limit|rate limit|rate_limit|limit reached|hit your limit|quota|too many requests|credit balance|resource_exhausted|resource exhausted|429|out of credits|limit will reset|resets at|resets in') { return 'limit' }
       if ($low -match 'overloaded|api error|authentication|not signed in|not logged in|invalid api key|invalid x-api-key|econnrefused|econnreset|network error|503|529|502|401|unauthorized') { return 'api' }
       return 'error' }
@@ -350,7 +357,7 @@ function Invoke-Runner($name) {
     $efile = Join-Path $B "effort\$name"; $effort = if (Test-Path $efile) { (Read-Text $efile).Trim() } else { '' }   # `agent effort`
     $envs = @{ BRIDGE_NO_HOOK = '1'; BRIDGE_NAME = $name }
     $newId = $null; $outFile = $null; $sendPrompt = $prompt
-    if ($kind -in @('antigravity','cursor','qwen')) { $prompt += "`n`nDo not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text." }
+    if ($kind -in @('antigravity','cursor','opencode','copilot')) { $prompt += "`n`nDo not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text." }
     if ($kind -eq 'claude') {
       $envs['CLAUDE_CONFIG_DIR'] = $dir
       $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
@@ -370,20 +377,31 @@ function Invoke-Runner($name) {
       if ($safe) { $cargs += @('--mode', 'accept-edits') } elseif ($bypass) { $cargs += '--dangerously-skip-permissions' } else { $cargs += @('--mode', 'plan') }
       if ($mdl) { $cargs += @('--model', $mdl) }; if ($effort) { $cargs += @('--effort', $effort) }
       if (Test-Path $sf) { $cargs += @('--conversation', (Read-Text $sf).Trim()) }
-    } elseif ($kind -eq 'cursor' -or $kind -eq 'qwen') {
-      # state lives under <HOME>\.cursor / .qwen; the account dir maps to the HOME that owns it. Cursor is ALWAYS cursor-agent, never `agent` (the bridge command).
-      $dl = $dir.TrimEnd('\', '/'); if ($dl -match '^(.*)[\\/]\.(cursor|qwen)$') { $ah = $Matches[1] } elseif ((Test-Path (Join-Path $dir '.cursor')) -or (Test-Path (Join-Path $dir '.qwen'))) { $ah = $dir } else { $ah = $HOME }
+    } elseif ($kind -eq 'cursor') {
+      # state lives under <HOME>\.cursor; the account dir maps to the HOME that owns it. Cursor is ALWAYS cursor-agent, never `agent` (the bridge command).
+      $dl = $dir.TrimEnd('\', '/'); if ($dl -match '^(.*)[\\/]\.cursor$') { $ah = $Matches[1] } elseif (Test-Path (Join-Path $dir '.cursor')) { $ah = $dir } else { $ah = $HOME }
       $envs['USERPROFILE'] = $ah; $envs['HOME'] = $ah; $sendPrompt = ''
       $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
-      if ($kind -eq 'cursor') {
-        $cargs = @('-p', $prompt, '--output-format', 'stream-json', '--trust')
-        if ($safe) { } elseif ($bypass) { $cargs += '--force' } else { $cargs += @('--mode', 'plan') }
-        if ($mdl) { $cargs += @('--model', $mdl) }; if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) }
-      } else {
-        $envs['QWEN_CODE_SUPPRESS_YOLO_WARNING'] = '1'
-        $cargs = @($prompt, '--output-format', 'stream-json')
-        if ($safe) { $cargs += @('--approval-mode', 'auto-edit') } elseif ($bypass) { $cargs += @('--approval-mode', 'yolo') } else { $cargs += @('--approval-mode', 'plan') }
-        if ($mdl) { $cargs += @('-m', $mdl) }; if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) } }
+      $cargs = @('-p', $prompt, '--output-format', 'stream-json', '--trust')
+      if ($safe) { } elseif ($bypass) { $cargs += '--force' } else { $cargs += @('--mode', 'plan') }
+      if ($mdl) { $cargs += @('--model', $mdl) }; if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) }
+    } elseif ($kind -eq 'opencode') {
+      # all opencode-N workers share one install (auth.json); each has its own session and directory. Only free models unless BRIDGE_OPENCODE_PAID=1.
+      $sendPrompt = ''
+      $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
+      $ocBlocked = $null; $ocm = $mdl; if (-not $ocm) { $ocm = (@(& $exe models 2>$null) | Where-Object { $_ -match '^opencode/.*-free$' } | Select-Object -First 1) }
+      if (-not $ocm -or ($ocm -notmatch '(-free|:free)$' -and $env:BRIDGE_OPENCODE_PAID -ne '1')) { $ocBlocked = "OpenCode model `"$ocm`" is not free. Pick an opencode/*-free or openrouter/...:free model with: agent model $name <provider/model> (paid models need BRIDGE_OPENCODE_PAID=1)." }
+      $cargs = @('run', '-m', $ocm, '--format', 'json', '--dir', $cwd)
+      if ($ocBlocked) { $cargs = @('--version') }
+      if (-not $ocBlocked -and (Test-Path $sf)) { $cargs += @('-s', (Read-Text $sf).Trim()) }
+      if (-not $ocBlocked) { $cargs += $prompt }
+    } elseif ($kind -eq 'copilot') {
+      $sendPrompt = ''
+      $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
+      $cargs = @('-p', $prompt, '--no-ask-user', '--output-format', 'json')
+      if ($bypass -and -not $safe) { $cargs += '--allow-all-tools' } else { $cargs += '--allow-tool=read' }
+      if ($mdl) { $cargs += @('--model', $mdl) }; if ($effort) { $cargs += @('--reasoning-effort', $effort) }
+      if (Test-Path $sf) { $cargs += @('--resume', (Read-Text $sf).Trim()) }
     } else {
       $st.activity = ''; $st.activityAt = ''; $st.stalledAt = ''; Set-Content -LiteralPath $live -Value $null -ErrorAction SilentlyContinue
       $cargs = @('chat', '--no-interactive', '--trust-workspace', '--output-format', 'stream-json')
@@ -396,7 +414,7 @@ function Invoke-Runner($name) {
       param($cwd, $envs, $exe, $cargs, $prompt, $live)
       Set-Location $cwd; foreach ($k in $envs.Keys) { Set-Item "env:$k" $envs[$k] }
       if ($live) { $prompt | & $exe @cargs 2>> "$live.err" | ForEach-Object { Add-Content -LiteralPath $live -Value $_ -Encoding UTF8 }; [pscustomobject]@{ Out = ''; Rc = $LASTEXITCODE } }
-      else { $out = ($prompt | & $exe @cargs 2>&1 | Out-String); [pscustomobject]@{ Out = $out; Rc = $LASTEXITCODE } } } -ArgumentList $cwd, $envs, $exe, $cargs, $sendPrompt, $(if ($kind -in @('claude','kiro','antigravity','cursor','qwen')) { $live } else { $null })
+      else { $out = ($prompt | & $exe @cargs 2>&1 | Out-String); [pscustomobject]@{ Out = $out; Rc = $LASTEXITCODE } } } -ArgumentList $cwd, $envs, $exe, $cargs, $sendPrompt, $(if ($kind -in @('claude','kiro','antigravity','cursor','opencode','copilot')) { $live } else { $null })
     $rc = 0; $res = ''; $t0 = Get-Epoch; $nAlert = 0
     while ($true) {
       if (Wait-Job $job -Timeout 2) { $r = Receive-Job $job; $rc = [int]$r.Rc; $res = [string]$r.Out; break }
@@ -430,13 +448,34 @@ function Invoke-Runner($name) {
       if ($fin.result.status -and $fin.result.status -ne 'SUCCESS' -and $rc -eq 0) { $rc = 1 }
       if ($fin.result.response) { $res = [string]$fin.result.response } elseif (-not $res) { $res = (Read-Text "$live.err") + "`n" + ((Read-Live | Select-Object -Last 20) -join "`n") }
       if ($fin.result.conversation_id -and $rc -eq 0) { Write-Text $sf $fin.result.conversation_id }
-    } elseif ($kind -eq 'cursor' -or $kind -eq 'qwen') {
+    } elseif ($kind -eq 'cursor') {
       $events = @(Read-Live | ForEach-Object { ConvertFrom-Line $_ } | Where-Object { $_ })
       $fin = $events | Where-Object { $_.type -eq 'result' } | Select-Object -Last 1
       if ($fin.is_error -and $rc -eq 0) { $rc = 1 }
       $ftxt = if ($fin.result) { [string]$fin.result } elseif ($fin.error.message) { [string]$fin.error.message } else { '' }
       if ($ftxt) { $res = $ftxt } elseif (-not $res) { $res = (Read-Text "$live.err") + "`n" + ((Read-Live | Select-Object -Last 20) -join "`n") }
       if ($fin.session_id -and $rc -eq 0) { Write-Text $sf $fin.session_id }
+    } elseif ($kind -eq 'opencode') {
+      $events = @(Read-Live | ForEach-Object { ConvertFrom-Line $_ } | Where-Object { $_ })
+      $errs = ($events | Where-Object { $_.type -eq 'error' } | ForEach-Object { if ($_.error.data.message) { $_.error.data.message } elseif ($_.error.message) { $_.error.message } else { $_.error.name } }) -join ' '
+      if ($errs -and $rc -eq 0) { $rc = 1 }
+      if ($ocBlocked) { $rc = 1; $errs = $ocBlocked }
+      $txt = ($events | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.part.text }) -join "`n"
+      if ($txt -and $rc -eq 0 -and -not $ocBlocked) { $res = $txt } else { $res = $errs + "`n" + (Read-Text "$live.err") }
+      if ($res -match 'not scoped to a workspace') { $res += "`nConfig error: add the anthropic-workspace-id header under provider.anthropic.options.headers in ~/.config/opencode/opencode.jsonc." }
+      $sid = ($events | Where-Object { $_.sessionID } | Select-Object -Last 1).sessionID
+      if ($sid -and $rc -eq 0) { Write-Text $sf $sid }
+      $cost = ($events | Where-Object { $_.type -eq 'step_finish' } | ForEach-Object { [double]$_.part.cost } | Measure-Object -Sum).Sum
+      $costFile = Join-Path $B "runs\$name.cost"; $prev = 0.0; if (Test-Path $costFile) { [void][double]::TryParse((Read-Text $costFile).Trim(), [ref]$prev) }
+      Write-Text $costFile ('{0:F6}' -f ($prev + [double]$cost))
+    } elseif ($kind -eq 'copilot') {
+      $events = @(Read-Live | ForEach-Object { ConvertFrom-Line $_ } | Where-Object { $_ })
+      $fin = $events | Where-Object { $_.type -eq 'result' } | Select-Object -Last 1
+      if ($fin.exitCode -and $fin.exitCode -ne 0 -and $rc -eq 0) { $rc = 1 }
+      $txt = ($events | Where-Object { $_.type -eq 'assistant.message' } | ForEach-Object { if ($_.data.content) { $_.data.content } else { $_.content } }) -join "`n"
+      if ($txt) { $res = $txt } elseif (-not $res) { $res = (Read-Text "$live.err") + "`n" + ((Read-Live | Select-Object -Last 20) -join "`n") }
+      if ($fin.sessionId -and $rc -eq 0) { Write-Text $sf $fin.sessionId }
+      if ($fin.usage.premiumRequests) { $pf = Join-Path $B "runs\$name.premium"; $pp = 0.0; if (Test-Path $pf) { [void][double]::TryParse((Read-Text $pf).Trim(), [ref]$pp) }; Write-Text $pf ([string]($pp + [double]$fin.usage.premiumRequests)) }
     } elseif ($newId -and $rc -eq 0) { Write-Text $sf $newId }
     $resetAt = $null
     if ($kind -eq 'claude') {
