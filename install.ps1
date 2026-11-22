@@ -4,7 +4,7 @@
 # Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-Safe] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
 # If scripts are blocked:  powershell -ExecutionPolicy Bypass -File .\install.ps1
-param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$Safe, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$KiroDir = @(), [string[]]$Name = @())
+param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switch]$Yes, [switch]$NoBypass, [switch]$Safe, [switch]$NoPath, [switch]$NoTrust, [string]$Skills = '', [string[]]$ClaudeDir = @(), [string[]]$CodexDir = @(), [string[]]$KiroDir = @(), [string[]]$AgyDir = @(), [string[]]$CursorDir = @(), [string[]]$QwenDir = @(), [string[]]$Name = @())
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -67,19 +67,30 @@ function Norm($p) {
 $Claude = New-Object System.Collections.Generic.List[string]
 $Codex = New-Object System.Collections.Generic.List[string]
 $Kiro = New-Object System.Collections.Generic.List[string]
+$Agy = New-Object System.Collections.Generic.List[string]
+$Cursor = New-Object System.Collections.Generic.List[string]
+$Qwen = New-Object System.Collections.Generic.List[string]
 function Add-Dir($kind, $p) {
   $d = Norm $p; if (-not $d -or -not (Test-Path $d -PathType Container)) { return }
   if ((Split-Path $d -Leaf) -eq '.claude-bridge') { return }
-  $list = $Codex; if ($kind -eq 'claude') { $list = $Claude } elseif ($kind -eq 'kiro') { $list = $Kiro }
+  $list = $Codex; if ($kind -eq 'claude') { $list = $Claude } elseif ($kind -eq 'kiro') { $list = $Kiro } elseif ($kind -eq 'antigravity') { $list = $Agy } elseif ($kind -eq 'cursor') { $list = $Cursor } elseif ($kind -eq 'qwen') { $list = $Qwen }
   if (-not ($list | Where-Object { $_ -ieq $d })) { $list.Add($d) } }
 foreach ($d in $ClaudeDir) { Add-Dir 'claude' $d }
 foreach ($d in $CodexDir) { Add-Dir 'codex' $d }
 foreach ($d in $KiroDir) { Add-Dir 'kiro' $d }
+foreach ($d in $AgyDir) { Add-Dir 'antigravity' $d }
+foreach ($d in $CursorDir) { Add-Dir 'cursor' $d }
+foreach ($d in $QwenDir) { Add-Dir 'qwen' $d }
 foreach ($d in (Get-ChildItem $UserHome -Directory -Force -Filter '.claude*' -ErrorAction SilentlyContinue)) {
   foreach ($m in 'settings.json', '.credentials.json', 'projects', 'commands', 'skills') { if (Test-Path (Join-Path $d.FullName $m)) { Add-Dir 'claude' $d.FullName; break } } }
 foreach ($d in (Get-ChildItem $UserHome -Directory -Force -Filter '.codex*' -ErrorAction SilentlyContinue)) {
   foreach ($m in 'auth.json', 'config.toml', 'hooks.json', 'sessions') { if (Test-Path (Join-Path $d.FullName $m)) { Add-Dir 'codex' $d.FullName; break } } }
 if ((Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.kiro\sessions'))) { Add-Dir 'kiro' (Join-Path $UserHome '.kiro') }
+# Cursor CLI (binary cursor-agent, never the bare `agent`) and Qwen Code (qwen): one account per HOME (.cursor, .qwen)
+if ((Get-Command cursor-agent -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.cursor\chats'))) { Add-Dir 'cursor' (Join-Path $UserHome '.cursor') }
+if ((Get-Command qwen -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.qwen'))) { Add-Dir 'qwen' (Join-Path $UserHome '.qwen') }
+# Google Antigravity (agy): one account per HOME (.gemini\antigravity-cli); its sign-in lives in the system, not in that folder
+if ((Get-Command agy -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.gemini\antigravity-cli'))) { $ad = Join-Path $UserHome '.gemini\antigravity-cli'; if (-not $DryRun) { Ensure-Dir $ad }; Add-Dir 'antigravity' $ad }
 foreach ($scope in 'Process', 'User', 'Machine') {
   $v = [Environment]::GetEnvironmentVariable('CLAUDE_CONFIG_DIR', $scope); if ($v) { Add-Dir 'claude' $v }
   $v = [Environment]::GetEnvironmentVariable('CODEX_HOME', $scope); if ($v) { Add-Dir 'codex' $v } }
@@ -108,12 +119,18 @@ function Assign($d, $prefix) {
 foreach ($d in $Claude) { Assign $d 'claude' }
 foreach ($d in $Codex) { Assign $d 'codex' }
 foreach ($d in $Kiro) { Assign $d 'kiro' }
+foreach ($d in $Agy) { Assign $d 'agy' }
+foreach ($d in $Cursor) { Assign $d 'cursor' }
+foreach ($d in $Qwen) { Assign $d 'qwen' }
 
 if ($List) {
   Say 'system: windows'
   foreach ($d in $Claude) { Say "claude  $($Map[$d])  $d" }
   foreach ($d in $Codex) { Say "codex   $($Map[$d])  $d" }
   foreach ($d in $Kiro) { Say "kiro    $($Map[$d])  $d" }
+  foreach ($d in $Agy) { Say "agy     $($Map[$d])  $d" }
+  foreach ($d in $Cursor) { Say "cursor  $($Map[$d])  $d" }
+  foreach ($d in $Qwen) { Say "qwen    $($Map[$d])  $d" }
   return }
 
 # ---------- JSON / text helpers ----------
@@ -131,6 +148,9 @@ if ($Uninstall) {
   foreach ($d in $Claude) { Say "uninstalling Claude: $d"; if ($DryRun) { continue }; Ab-Uninstall-Claude $d; Remove-Skills $d }
   foreach ($d in $Codex) { Say "uninstalling Codex: $d"; if ($DryRun) { continue }; Ab-Uninstall-Codex $d; Remove-Skills $d }
   foreach ($d in $Kiro) { Say "uninstalling Kiro: $d"; if ($DryRun) { continue }; Ab-Uninstall-Kiro $d; Remove-Skills $d }
+  foreach ($d in $Agy) { Say "uninstalling Antigravity: $d"; if ($DryRun) { continue }; Ab-Uninstall-Agy $d; Remove-Skills (Agy-Cfg $d) }
+  foreach ($d in $Cursor) { Say "uninstalling Cursor: $d"; if ($DryRun) { continue }; Ab-Uninstall-Cursor $d; Remove-Skills $d }
+  foreach ($d in $Qwen) { Say "uninstalling Qwen: $d"; if ($DryRun) { continue }; Ab-Uninstall-Qwen $d; Remove-Skills $d }
   Say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; return }
 
 
@@ -159,6 +179,15 @@ if ($Check) {
   foreach ($d in $Kiro) { $n = $Map[$d]; $ag = Join-Path $d 'steering\AGENTS.md'
     if ((Read-Text $ag) -match 'BRIDGE-BEGIN') { Chk-Ok "Kiro    $n  steering" } else { Chk-Bad "Kiro    $n  steering missing" }
     if ((Read-Text (Join-Path $d 'steering\agent-bridge.md')) -eq (Read-Text (Join-Path $Src 'SKILL.md'))) { Chk-Ok "Kiro    $n  skill up to date" } else { Chk-Bad "Kiro    $n  skill missing or outdated" } }
+  foreach ($d in $Agy) { $n = $Map[$d]; $cfg = Agy-Cfg $d
+    if ((Read-Text (Join-Path $cfg 'AGENTS.md')) -match 'BRIDGE-BEGIN') { Chk-Ok "Agy     $n  global rules" } else { Chk-Bad "Agy     $n  global rules missing" }
+    if ((Read-Text (Join-Path $cfg 'skills\agent-bridge\SKILL.md')) -eq (Read-Text (Join-Path $Src 'SKILL.md'))) { Chk-Ok "Agy     $n  skill up to date" } else { Chk-Bad "Agy     $n  skill missing or outdated" } }
+  foreach ($d in $Cursor) { $n = $Map[$d]
+    if ((Read-Text (Join-Path $d 'skills\agent-bridge\SKILL.md')) -eq (Read-Text (Join-Path $Src 'SKILL.md'))) { Chk-Ok "Cursor  $n  skill up to date" } else { Chk-Bad "Cursor  $n  skill missing or outdated" }
+    if (Cursor-Agent-Clash) { Chk-Bad "Cursor  $n  'agent' on PATH is Cursor's, not the bridge's: workers call cursor-agent; reinstall the bridge command" } }
+  foreach ($d in $Qwen) { $n = $Map[$d]
+    if ((Read-Text (Join-Path $d 'QWEN.md')) -match 'BRIDGE-BEGIN') { Chk-Ok "Qwen    $n  QWEN.md" } else { Chk-Bad "Qwen    $n  QWEN.md block missing" }
+    if ((Read-Text (Join-Path $d 'skills\agent-bridge\SKILL.md')) -eq (Read-Text (Join-Path $Src 'SKILL.md'))) { Chk-Ok "Qwen    $n  skill up to date" } else { Chk-Bad "Qwen    $n  skill missing or outdated" } }
   Say ''; if ($script:bad -eq 0) { Ui-Info 'everything looks fine'; return } else { Ui-W "  ! $($script:bad) problem(s): run .\install.ps1 to repair" 'Yellow'; exit 1 } }
 
 if (-not $List -and -not $Uninstall) { Ui-Banner }
@@ -229,10 +258,10 @@ function Menu-Screen($n, $keys) { $script:Fast = $true; Clear-Host; Ui-Banner; U
 function Info-Wait { while ($true) { $k = [Console]::ReadKey($true); if ($k.Key -eq 'Enter') { return $false }; if ($k.KeyChar -eq 'b' -or $k.KeyChar -eq 'B') { return $true } } }
 if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
   # accounts as detected (information only); packages are the only selectable step
-  $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }; foreach ($d in $Kiro) { $acc += [pscustomobject]@{ Kind = 'kiro'; Dir = $d } }
+  $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }; foreach ($d in $Kiro) { $acc += [pscustomobject]@{ Kind = 'kiro'; Dir = $d } }; foreach ($d in $Agy) { $acc += [pscustomobject]@{ Kind = 'antigravity'; Dir = $d } }; foreach ($d in $Cursor) { $acc += [pscustomobject]@{ Kind = 'cursor'; Dir = $d } }; foreach ($d in $Qwen) { $acc += [pscustomobject]@{ Kind = 'qwen'; Dir = $d } }
   $pk = New-Object System.Collections.ArrayList
   [void]$pk.Add([pscustomobject]@{ Label = 'all'; Sub = 'select every package'; On = $false; Feat = $false })
-  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex + Kiro CLI sessions that talk to each other'; On = $true; Feat = $true })
+  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex + Kiro + Antigravity + Cursor + Qwen sessions that talk to each other'; On = $true; Feat = $true })
   foreach ($x in $SkList) { [void]$pk.Add([pscustomobject]@{ Label = $x.Name; Sub = $x.Desc; On = $false; Feat = $false }) }
   $step = 1
   while ($true) {
@@ -255,7 +284,7 @@ if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [C
       Menu-Screen 4 @('enter install', 'n back')
       $pkn = @(); if ($PkgAb) { $pkn += 'agent-bridge' }; $pkn += $SelSkills; $pkt = if ($pkn.Count) { $pkn -join ', ' } else { 'none' }
       if ($pkt.Length -gt 58) { $pkt = $pkt.Substring(0, 55) + "...  ($($pkn.Count) packages)" }
-      $sum = @("Accounts     $($Claude.Count + $Codex.Count)  ($($Claude.Count) claude / $($Codex.Count) codex)", "Packages     $pkt")
+      $sum = @("Accounts     $($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Qwen.Count)  ($($Claude.Count) claude / $($Codex.Count) codex / $($Kiro.Count) kiro / $($Agy.Count) agy / $($Cursor.Count) cursor / $($Qwen.Count) qwen)", "Packages     $pkt")
       if ($PkgAb) { $sum += "agent-bridge skill+commands, hook" + $(if ($optTrust) { ', auto-approve Codex hooks' }) + $(if ($optSafe) { ', safe-mode workers' } elseif ($optBypass) { ', bypass workers' }) + $(if ($optPath) { ', PATH' }) }
       Ui-Box 'Summary' $sum
       if (YN 'Install now?' $true) { break }
@@ -264,7 +293,7 @@ if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [C
 
 # ---------- install ----------
 Ui-H 'Installing'
-$script:Steps = $(if ($PkgAb) { 1 } else { 0 }) + $Claude.Count + $Codex.Count + $Kiro.Count
+$script:Steps = $(if ($PkgAb) { 1 } else { 0 }) + $Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Qwen.Count
 function Install-Skills($d) {
   foreach ($n in $SelSkills) {
     $from = Join-Path $RepoRoot $n; if (-not (Test-Path (Join-Path $from 'SKILL.md'))) { continue }
@@ -284,10 +313,22 @@ foreach ($d in $Codex) { $n = $Map[$d]
 foreach ($d in $Kiro) { $n = $Map[$d]
   Step ("Kiro    {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
     if ($PkgAb) { Ab-Install-Kiro $d $n }; Install-Skills $d } }
-if ($Claude.Count + $Codex.Count + $Kiro.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR / -KiroDir DIR.' }
+foreach ($d in $Agy) { $n = $Map[$d]
+  Step ("Agy     {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
+    if ($PkgAb) { Ab-Install-Agy $d $n }; Install-Skills (Agy-Cfg $d) } }
+foreach ($d in $Cursor) { $n = $Map[$d]
+  Step ("Cursor  {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
+    if ($PkgAb) { Ab-Install-Cursor $d $n }; Install-Skills $d } }
+foreach ($d in $Qwen) { $n = $Map[$d]
+  Step ("Qwen    {0,-9} {1}" -f $n, ($d -replace [regex]::Escape($UserHome), '~')) {
+    if ($PkgAb) { Ab-Install-Qwen $d $n }; Install-Skills $d } }
+# Cursor's official installer puts its own `agent` on PATH and overwrites the bridge command: workers always use cursor-agent
+if ($Cursor.Count -gt 0) { if (Cursor-Agent-Clash) { Say "! the 'agent' on your PATH is Cursor's, not the bridge's. The bridge only calls cursor-agent; reinstall the bridge command (install.ps1 without -NoPath)." }; Say 'Cursor: sign in with: cursor-agent login' }
+if ($Qwen.Count -gt 0) { Say 'Qwen Code: sign in once (qwen, then /auth) or set an API key' }
+if ($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Qwen.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR / -KiroDir DIR / -AgyDir DIR / -CursorDir DIR / -QwenDir DIR.' }
 if ($DryRun) { Say ''; Say 'dry-run finished: nothing was written.'; return }
-$msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count + $Kiro.Count) account(s) configured" }
+$msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Qwen.Count) account(s) configured" }
 $sum = @($msg); if ($SelSkills.Count -gt 0) { $sum += "$($S.ok) skills: $($SelSkills -join ' ')" }
-$sum += @('', 'Next steps', '  1. Restart open Claude/Codex/Kiro sessions')
+$sum += @('', 'Next steps', '  1. Restart open Claude/Codex/Kiro/Antigravity/Cursor/Qwen sessions')
 if ($PkgAb) { $sum += Ab-Next-Steps }
 Ui-Box 'Done' $sum

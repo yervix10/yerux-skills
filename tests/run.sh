@@ -4,10 +4,10 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; OLDPATH="$PATH"
 T="$(mktemp -d)"; trap 'kill $RP 2>/dev/null; rm -rf "$T"' EXIT; RP=""
-S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/proj"
+S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/agy-1" "$T/b/inbox/cursor-1" "$T/b/inbox/qwen-1" "$T/home/cursorhome/.cursor" "$T/home/qwenhome/.qwen" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/home/agyhome/.gemini/antigravity-cli" "$T/proj"
 cp -a "$ROOT/agent-bridge/scripts/." "$S/"
 export BRIDGE_DIR="$T/b" FAKEMODE="$T/mode" KIRO_TEST_HOME="$T/home/.kiro-fake" CLAUDE_TEST_ARGS="$T/claude-test-args" PATH="$T/bin:$PATH" BRIDGE_ALERT=0 BRIDGE_STALL=0 BRIDGE_WORKTREE=0 BRIDGE_LIMIT_PAUSE=3 BRIDGE_COMPACT_AT=40 BRIDGE_NOTIFY=0
-printf "%s\n%s\n%s\n" "$T/home/.claude-fake=w1" "$T/home/.codex-fake=w2" "$T/home/.kiro-fake=kiro-1" > "$T/b/names.conf"; echo adm > "$T/b/admin"
+printf "%s\n%s\n%s\n%s\n" "$T/home/.claude-fake=w1" "$T/home/.codex-fake=w2" "$T/home/.kiro-fake=kiro-1" "$T/home/agyhome/.gemini/antigravity-cli=agy-1" > "$T/b/names.conf"; printf "%s\n%s\n" "$T/home/cursorhome/.cursor=cursor-1" "$T/home/qwenhome/.qwen=qwen-1" >> "$T/b/names.conf"; echo adm > "$T/b/admin"
 cat > "$T/bin/claude" <<'EOF'
 #!/bin/bash
 echo "$PWD" > "$FAKEMODE.cwd"
@@ -45,6 +45,21 @@ echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"se
 echo '{"type":"sessionUpdate","data":{"sessionId":"sess-kiro-test","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Segunda parte."}}}}'
 echo '{"type":"runFinished","data":{"sessionId":"sess-kiro-test","status":"success","finalText":"Primera parte.\\nSegunda parte."}}'
 EOF
+cat > "$T/bin/agy" <<'EOF'
+#!/bin/bash
+if [ "$1" = models ]; then printf 'Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n'; exit 0; fi
+echo "$*" > "$FAKEMODE.agyargs"; echo "$HOME" > "$FAKEMODE.agyhome"; echo "$PWD" > "$FAKEMODE.agycwd"
+[[ "$*" == *"--conversation conv-agy-test"* ]] && echo resumed >> "$FAKEMODE.agyresumed"
+case "$(cat "$FAKEMODE")" in
+  limit) echo "error: RESOURCE_EXHAUSTED: quota exceeded for this model" >&2; exit 1;;
+  auth)  echo "authentication required" >&2; exit 1;;
+esac
+echo '{"event":"init","conversation_id":"conv-agy-test","init":{"cwd":"x","tools":[]}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"conv-agy-test","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"ls /tmp"}}}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"conv-agy-test","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100000,"cache_read_tokens":0,"output_tokens":0,"total_tokens":100000}}}'
+echo '{"event":"result","result":{"conversation_id":"conv-agy-test","status":"SUCCESS","response":"agy listo\n","usage":{"total_tokens":1}}}'
+EOF
+chmod +x "$T/bin/agy"
 chmod +x "$T/bin/claude" "$T/bin/codex"
 chmod +x "$T/bin/kiro-cli"
 chmod +x "$S/bridge-kiro-response"
@@ -250,5 +265,128 @@ check "Kiro capacity tiers use its monthly quota" "$("$S/bridge-capacity" --tier
 KJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
 check "Kiro auto model explains task routing" "$(printf '%s' "$KJSON" | jq -r '.agents[]|select(.name=="kiro-1")|.model_note')" "Kiro elige el modelo según la tarea (Models chosen by task)."
 check "Kiro widget data carries plan, credits and monthly percent" "$(printf '%s' "$KJSON" | jq -r '.agents[]|select(.name=="kiro-1")|[.monthly.used,.monthly.credits_used,.monthly.credits_total,.monthly.plan]|@tsv')" "14.5	7.25	50	KIRO FREE"
+
+echo "Antigravity (agy) provider with a fake agy"
+mkdir -p "$T/agy-proj"
+check "provider resolver detects Antigravity config dir" "$("$S/bridge-provider" agy-1)" "antigravity"
+check "agy HOME is derived from the account dir" "$("$S/bridge-agy-home" "$T/home/agyhome/.gemini/antigravity-cli")" "$T/home/agyhome"
+check "provider marker overrides the folder name" "$(mkdir -p "$T/home/custom" && echo antigravity > "$T/home/custom/provider" && "$S/bridge-provider" "$T/home/custom")" "antigravity"
+check "Antigravity tier defaults to normal without quota data" "$("$S/bridge-capacity" --tier agy-1)" "normal"
+check "Antigravity model is checked against agy models" "$(BRIDGE_NAME=adm "$S/agent" model agy-1 gemini-3.8-flash-high high)" "agy-1: model set to gemini-3.8-flash-high (applies from its next order)
+agy-1: effort set to high (applies from its next order)"
+check "Antigravity rejects an unknown model" "$(BRIDGE_NAME=adm "$S/agent" model agy-1 nope 2>&1)" "unknown Antigravity model or agy not available (see: agy models)"
+check "Antigravity accepts max effort" "$(BRIDGE_NAME=adm "$S/agent" effort agy-1 max)" "agy-1: effort set to max (applies from its next order)"
+BRIDGE_NAME=adm "$S/agent" effort agy-1 high >/dev/null
+echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start agy-1
+printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
+check "Antigravity runner returns the final response" "$(last_msg)" "agy listo"
+check "Antigravity runs with bypass, model and effort" "$(grep -c -e '--dangerously-skip-permissions' -e '--model gemini-3.8-flash-high --effort high' "$FAKEMODE.agyargs")" "1"
+check "Antigravity runs under its own HOME" "$(cat "$FAKEMODE.agyhome")" "$T/home/agyhome"
+check "Antigravity prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.agyargs")" "1"
+agy_sf="$(find "$T/b/sessions/agy-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "Antigravity saves its conversation id" "$(cat "$agy_sf" 2>/dev/null)" "conv-agy-test"
+printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nsecond order\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
+check "Antigravity resumes by --conversation" "$(wc -l < "$FAKEMODE.agyresumed" 2>/dev/null | tr -d ' ')" "1"
+check "Antigravity context is estimated from tokens" "$("$S/bridge-usage" agy-1 | cut -f4)" "10"
+check "Antigravity usage shows set model and effort" "$("$S/bridge-usage" agy-1 | cut -f1,8)" "gemini-3.8-flash-high	high"
+AJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "Antigravity dashboard row has kind, no quota windows" "$(printf '%s' "$AJSON" | jq -r '.agents[]|select(.name=="agy-1")|[.kind,.five_hour.used,.weekly.used,.monthly.used,.tier]|@tsv')" "antigravity				normal"
+check "Antigravity feed reads its live log" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" agy-1 2>/dev/null | jq -r '[.[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "run_command"
+echo limit > "$T/mode"; printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nthird\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
+check "Antigravity quota error pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+check "Antigravity pause is recorded" "$(sed -n 's/^last_kind=//p' "$T/b/runs/agy-1.state")" "limit"
+echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; start agy-1; wait_reply $((base_count + 4)); stop
+check "Antigravity authentication failure is an API error" "$(last_msg | head -c 10)" "API ERROR:"
+
+echo "Cursor (cursor-agent) and Qwen Code (qwen) providers with fakes"; export PATH="$T/bin:$OLDPATH"
+mkdir -p "$T/cur-proj" "$T/qwen-proj"
+cat > "$T/bin/cursor-agent" <<'EOF'
+#!/bin/bash
+if [ "$1" = models ]; then printf 'Available models\n\nauto - Auto (current, default)\ncomposer-2.5 - Composer 2.5\n'; exit 0; fi
+echo "$*" > "$FAKEMODE.curargs"; echo "$HOME" > "$FAKEMODE.curhome"
+[[ "$*" == *"--resume sess-cur-test"* ]] && echo resumed >> "$FAKEMODE.curresumed"
+case "$(cat "$FAKEMODE")" in
+  limit) echo "ActionRequiredError: You've hit your usage limit Get Cursor Pro for more Agent usage" >&2; exit 1;;
+  auth)  echo "Error: Not logged in. Run cursor-agent login" >&2; exit 1;;
+esac
+echo '{"type":"system","subtype":"init","session_id":"sess-cur-test","model":"Auto"}'
+echo '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"shellToolCall":{"args":{"command":"ls /tmp"}}},"session_id":"sess-cur-test"}'
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"cursor listo"}]},"session_id":"sess-cur-test"}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"cursor listo","session_id":"sess-cur-test","usage":{"inputTokens":40000,"outputTokens":10,"cacheReadTokens":10000,"cacheWriteTokens":0}}'
+EOF
+cat > "$T/bin/qwen" <<'EOF'
+#!/bin/bash
+echo "$*" > "$FAKEMODE.qwenargs"; echo "$HOME" > "$FAKEMODE.qwenhome"
+[[ "$*" == *"--resume sess-qwen-test"* ]] && echo resumed >> "$FAKEMODE.qwenresumed"
+case "$(cat "$FAKEMODE")" in
+  limit) echo '{"type":"result","subtype":"error_during_execution","session_id":"sess-qwen-test","is_error":true,"error":{"message":"429 Too Many Requests: quota exceeded"}}'; exit 1;;
+  auth)  echo '{"type":"result","subtype":"error_during_execution","session_id":"s","is_error":true,"error":{"message":"No auth type is selected. Please configure an auth type"}}'; exit 0;;
+esac
+echo '{"type":"system","subtype":"init","session_id":"sess-qwen-test","model":"qwen3-coder"}'
+echo '{"type":"assistant","session_id":"sess-qwen-test","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"run_shell_command","input":{"command":"ls /tmp"}}],"usage":{"input_tokens":64000,"output_tokens":5,"cache_read_input_tokens":0}}}'
+echo '{"type":"assistant","session_id":"sess-qwen-test","message":{"role":"assistant","content":[{"type":"text","text":"qwen listo"}],"usage":{"input_tokens":64000,"output_tokens":5,"cache_read_input_tokens":0}}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"qwen listo","session_id":"sess-qwen-test","usage":{"input_tokens":64000,"output_tokens":5}}'
+EOF
+chmod +x "$T/bin/cursor-agent" "$T/bin/qwen"
+check "provider resolver detects Cursor and Qwen account dirs" "$("$S/bridge-provider" cursor-1)/$("$S/bridge-provider" qwen-1)" "cursor/qwen"
+check "account HOME of .cursor/.qwen is its parent" "$("$S/bridge-account-home" "$T/home/cursorhome/.cursor")/$("$S/bridge-account-home" "$T/home/qwenhome/.qwen/")" "$T/home/cursorhome/$T/home/qwenhome"
+check "Cursor model is checked against cursor-agent models" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 composer-2.5)" "cursor-1: model set to composer-2.5 (applies from its next order)"
+check "Cursor rejects an unknown model" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 nope 2>&1)" "unknown Cursor model or cursor-agent not available (see: cursor-agent models)"
+check "Cursor has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort cursor-1 high 2>&1 | head -c 33)" "effort is not configurable for cur"
+check "Qwen has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort qwen-1 high 2>&1 | head -c 33)" "effort is not configurable for qwe"
+check "Cursor and Qwen tier defaults to normal without quota data" "$("$S/bridge-capacity" --tier cursor-1)/$("$S/bridge-capacity" --tier qwen-1)" "normal/normal"
+echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start cursor-1
+printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
+check "Cursor runner returns the final result" "$(last_msg)" "cursor listo"
+check "Cursor runs cursor-agent -p with force, trust and model" "$(grep -c -e '^-p .*--output-format stream-json --force --trust --model composer-2.5' "$FAKEMODE.curargs")" "1"
+check "Cursor runs under its account HOME" "$(cat "$FAKEMODE.curhome")" "$T/home/cursorhome"
+check "Cursor prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.curargs")" "1"
+cur_sf="$(find "$T/b/sessions/cursor-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "Cursor saves its session id" "$(cat "$cur_sf" 2>/dev/null)" "sess-cur-test"
+printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nsecond\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
+check "Cursor resumes with --resume <id>" "$(wc -l < "$FAKEMODE.curresumed" 2>/dev/null | tr -d ' ')" "1"
+check "Cursor context is estimated from input+cache tokens" "$("$S/bridge-usage" cursor-1 | cut -f4)" "25"
+check "Cursor usage shows the chosen model" "$("$S/bridge-usage" cursor-1 | cut -f1)" "composer-2.5"
+CJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "Cursor dashboard row has kind and no quota windows" "$(printf '%s' "$CJSON" | jq -r '.agents[]|select(.name=="cursor-1")|[.kind,.five_hour.used,.weekly.used,.monthly.used,.tier]|@tsv')" "cursor				normal"
+check "Cursor feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" cursor-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "shell"
+echo limit > "$T/mode"; printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nthird\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
+check "Cursor usage limit pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+check "Cursor pause is recorded" "$(sed -n 's/^last_kind=//p' "$T/b/runs/cursor-1.state")" "limit"
+echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; start cursor-1; wait_reply $((base_count + 4)); stop
+check "Cursor login failure is an API error" "$(last_msg | head -c 10)" "API ERROR:"
+rm -f "$FAKEMODE.curargs"; echo ok > "$T/mode"; BRIDGE_BYPASS=safe start cursor-1; printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nfifth\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 5)); stop
+check "Cursor safe mode drops --force" "$(grep -c -e '--force' "$FAKEMODE.curargs")" "0"
+echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start qwen-1
+printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
+check "Qwen runner returns the final result" "$(last_msg)" "qwen listo"
+check "Qwen runs qwen <prompt> in yolo, stream-json" "$(grep -c -e '--output-format stream-json --approval-mode yolo' "$FAKEMODE.qwenargs")" "1"
+check "Qwen runs under its account HOME" "$(cat "$FAKEMODE.qwenhome")" "$T/home/qwenhome"
+check "Qwen prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.qwenargs")" "1"
+qwen_sf="$(find "$T/b/sessions/qwen-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "Qwen saves its session id" "$(cat "$qwen_sf" 2>/dev/null)" "sess-qwen-test"
+printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nsecond\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
+check "Qwen resumes with --resume <id>" "$(wc -l < "$FAKEMODE.qwenresumed" 2>/dev/null | tr -d ' ')" "1"
+check "Qwen context is estimated from assistant usage" "$("$S/bridge-usage" qwen-1 | cut -f4)" "25"
+QJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "Qwen dashboard row has kind and no quota windows" "$(printf '%s' "$QJSON" | jq -r '.agents[]|select(.name=="qwen-1")|[.kind,.five_hour.used,.weekly.used,.monthly.used,.tier]|@tsv')" "qwen				normal"
+check "Qwen feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" qwen-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "run_shell_command"
+echo limit > "$T/mode"; printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nthird\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
+check "Qwen 429 pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; start qwen-1; wait_reply $((base_count + 4)); stop
+check "Qwen unauthenticated result (rc 0, is_error) is an error" "$(last_msg | head -c 6)" "ERROR "
+echo "installer: Cursor and Qwen accounts"; export PATH="$OLDPATH"
+HC="$T/ihome3"; mkdir -p "$HC/.cursor" "$HC/.qwen"
+instc() { ( cd "$ROOT" && HOME="$HC" BRIDGE_DIR= ./install.sh "$@" ); }
+check "installer --list shows Cursor and Qwen accounts" "$(instc --list --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" 2>&1 | grep -c -e '^cursor ' -e '^qwen ')" "2"
+instc --yes --no-path --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1
+check "installer writes Cursor skill and provider marker" "$([ -f "$HC/.cursor/skills/agent-bridge/SKILL.md" ] && cat "$HC/.cursor/provider")" "cursor"
+check "installer writes the Qwen block and marker" "$(grep -c BRIDGE-BEGIN "$HC/.qwen/QWEN.md")/$(cat "$HC/.qwen/provider")" "1/qwen"
+check "installer check passes for Cursor and Qwen" "$(instc --check --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1; echo $?)" "0"
+# a Cursor-installed `agent` shadowing the bridge command is reported
+mkdir -p "$HC/fakebin/cursor-agent"; printf '#!/bin/sh\necho 2026.11.22-test cursor\n' > "$HC/fakebin/cursor-agent/agent"; chmod +x "$HC/fakebin/cursor-agent/agent"; ln -sfn "$HC/fakebin/cursor-agent/agent" "$HC/fakebin/agent"
+check "installer warns when 'agent' on PATH is Cursor's" "$(PATH="$HC/fakebin:$OLDPATH" instc --check --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" 2>&1 | grep -c "is Cursor's")" "1"
+instc --uninstall --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1
+check "uninstall removes Cursor/Qwen files" "$([ -e "$HC/.cursor/skills/agent-bridge" ] || [ -e "$HC/.qwen/skills/agent-bridge" ] || [ -e "$HC/.qwen/provider" ] && echo left || echo clean)" "clean"
 
 echo; echo "passed: $pass  failed: $fail"; [ $fail = 0 ]

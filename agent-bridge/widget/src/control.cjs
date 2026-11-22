@@ -8,13 +8,13 @@ const KIRO_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
 function effortOptions(kind) {
   if (kind === 'claude') return CLAUDE_EFFORTS;
   if (kind === 'codex') return CODEX_EFFORTS;
-  if (kind === 'kiro') return KIRO_EFFORTS;
+  if (kind === 'kiro' || kind === 'antigravity') return KIRO_EFFORTS;
   return [];
 }
 
 function modelOptions(kind, codexModels = []) {
   if (kind === 'claude') return CLAUDE_MODELS;
-  if (kind === 'codex' || kind === 'kiro') return [...new Set(['default', ...codexModels.filter((model) => /^[A-Za-z0-9._-]{1,80}$/.test(model))])];
+  if (kind === 'codex' || kind === 'kiro' || kind === 'antigravity' || kind === 'cursor') return [...new Set(['default', ...codexModels.filter((model) => /^[A-Za-z0-9._-]{1,80}$/.test(model))])];
   return [];
 }
 
@@ -26,7 +26,7 @@ function validateControl(agent, request, codexModels = []) {
     return '';
   }
   if (request?.action === 'effort') return effortOptions(agent.kind).includes(request.value) ? '' : 'Esfuerzo no permitido';
-  if (request?.action === 'compact') return ['claude', 'codex', 'kiro'].includes(agent.kind) ? '' : 'Tipo de agente no compatible';
+  if (request?.action === 'compact') return ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'qwen'].includes(agent.kind) ? '' : 'Tipo de agente no compatible';
   return 'Acción no permitida';
 }
 

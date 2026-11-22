@@ -173,6 +173,16 @@ function accountHome(name) {
   try { return fs.readFileSync(path.join(bridge, 'names.conf'), 'utf8').split(/\r?\n/).find((line) => line.split('=')[1] === name)?.split('=')[0] || ''; } catch { return ''; }
 }
 function providerModels(kind, name, callback) {
+  if (kind === 'cursor') { // never the bare `agent` command: on this machine it is the bridge
+    const cursor = process.env.CURSOR_AGENT_CLI || path.join(require('node:os').homedir(), '.local', 'bin', 'cursor-agent');
+    return execFile(cursor, ['models'], { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 }, (error, stdout) =>
+      callback(error ? [] : String(stdout).split(/\r?\n/).map((line) => line.split(' - ')[0].trim()).filter((id) => /^[A-Za-z0-9._-]{1,80}$/.test(id))));
+  }
+  if (kind === 'antigravity') {
+    const agy = process.env.AGY_CLI || path.join(require('node:os').homedir(), '.local', 'bin', 'agy');
+    return execFile(agy, ['models'], { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 }, (error, stdout) =>
+      callback(error ? [] : String(stdout).split(/\r?\n/).map((line) => line.split('\t')[0].trim()).filter((id) => /^[A-Za-z0-9._-]{1,80}$/.test(id) && id !== 'Fetching')));
+  }
   const command = kind === 'kiro' ? (process.env.KIRO_CLI || path.join(require('node:os').homedir(), '.local', 'bin', 'kiro-cli')) : 'codex';
   const args = kind === 'kiro' ? ['chat', '--list-models', '--format', 'json'] : ['debug', 'models'];
   execFile(command, args, { encoding: 'utf8', timeout: 8000, maxBuffer: 2 * 1024 * 1024,
@@ -347,7 +357,7 @@ async function createWidget() {
     if (!agent) return { ok: false, message: 'Agente no disponible en el dashboard' };
     try {
       let listedModels = [];
-      if (['codex', 'kiro'].includes(agent.kind) && request.action === 'model') listedModels = await new Promise((resolve) => providerModels(agent.kind, agent.name, resolve));
+      if (['codex', 'kiro', 'antigravity', 'cursor'].includes(agent.kind) && request.action === 'model') listedModels = await new Promise((resolve) => providerModels(agent.kind, agent.name, resolve));
       const validationError = validateControl(agent, request, listedModels);
       if (validationError) throw new Error(validationError);
       if (request.action === 'model') {

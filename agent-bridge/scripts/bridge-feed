@@ -165,6 +165,38 @@ function parseKiro(line) {
   else if (o.type === 'runFinished' && o.data?.finalText) out.push({ ts, role: 'result', text: trunc(o.data.finalText) });
   return out;
 }
+function parseAgy(line, ts = new Date().toISOString()) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const out = []; const u = o.step_update || {};
+  if (o.event === 'step_update' && u.step_type === 'tool') {
+    const params = u.tool_info?.parameters || {};
+    if (u.state === 'ACTIVE') out.push({ ts, role: 'tool', tool: trunc(u.tool_name || 'Antigravity tool'), text: trunc(printable(params.CommandLine || params.AbsolutePath || params.Query || params.TargetFile || params)) });
+    else if (u.state === 'DONE') out.push({ ts, role: 'tool_result', tool: trunc(u.tool_name || 'Antigravity tool'), text: trunc(printable(u.tool_info?.output || '')) });
+  } else if (o.event === 'result' && o.result?.response) out.push({ ts, role: 'result', text: trunc(o.result.response) });
+  return out;
+}
+// Cursor (cursor-agent stream-json) and Qwen Code (Claude-compatible stream-json) read from the runner's live log
+function parseCursor(line, ts = new Date().toISOString()) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const out = [];
+  if (o.type === 'tool_call' && o.tool_call && typeof o.tool_call === 'object') {
+    const [key, val] = Object.entries(o.tool_call)[0] || ['tool', {}]; const a = val?.args || {}; const tool = trunc(String(key).replace(/ToolCall$/, ''));
+    if (o.subtype === 'started') out.push({ ts, role: 'tool', tool, text: trunc(printable(a.command || a.path || a.pattern || a.query || a)) });
+    else if (o.subtype === 'completed') out.push({ ts, role: 'tool_result', tool, text: trunc(printable(val?.result?.success?.stdout || val?.result?.success?.content || val?.result || '')) });
+  } else if (o.type === 'assistant') { for (const c of o.message?.content || []) if (c.type === 'text' && c.text) out.push({ ts, role: 'assistant', text: trunc(c.text) }); }
+  else if (o.type === 'result' && o.result) out.push({ ts, role: 'result', text: trunc(o.result) });
+  return out;
+}
+function parseQwen(line, ts = new Date().toISOString()) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const out = [];
+  if (o.type === 'assistant') { for (const c of o.message?.content || []) {
+    if (c.type === 'tool_use') out.push({ ts, role: 'tool', tool: trunc(c.name || 'Qwen tool'), text: trunc(printable(c.input?.command || c.input?.file_path || c.input?.path || c.input?.pattern || c.input)) });
+    else if (c.type === 'text' && c.text) out.push({ ts, role: 'assistant', text: trunc(c.text) }); } }
+  else if (o.type === 'user') { for (const c of o.message?.content || []) if (c.type === 'tool_result') out.push({ ts, role: 'tool_result', tool: trunc(c.tool_use_id || 'Qwen tool'), text: trunc(printable(c.content)) }); }
+  else if (o.type === 'result') { const t = o.result || o.error?.message; if (t) out.push({ ts, role: 'result', text: trunc(t) }); }
+  return out;
+}
 function tail(file, maxBytes = 1_000_000) {
   let fd;
   try {
@@ -217,6 +249,14 @@ function feed(name, opts = {}) {
     const chosen=sessionId?files.filter(f=>f.includes(`${sessionId}/`)):files.sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs).slice(0,1);
     for(const f of chosen)for(const l of tail(f))events.push(...parseKiro(l));
   }
+  else if(kind==='antigravity') { // the runner's live log (stream-json of the last order); agy keeps no readable transcript
+    const live=path.join(root,'logs',`${name}.live`); let ts=new Date().toISOString(); try{ts=fs.statSync(live).mtime.toISOString();}catch{}
+    for(const l of tail(live))events.push(...parseAgy(l,ts));
+  }
+  else if(kind==='cursor'||kind==='qwen') { // the runner's live log (stream-json of the last order)
+    const live=path.join(root,'logs',`${name}.live`); let ts=new Date().toISOString(); try{ts=fs.statSync(live).mtime.toISOString();}catch{}
+    for(const l of tail(live))events.push(...(kind==='cursor'?parseCursor:parseQwen)(l,ts));
+  }
   else { const homes=[...new Set([path.join(os.homedir(),'.codex'), ...fs.readdirSync(os.homedir()).filter(x=>x.startsWith('.codex')).map(x=>path.join(os.homedir(),x)),config||''])]; for(const h of homes)readFiles(path.join(h,'sessions'),parseCodex,ids); }
   try { const log=tail(path.join(root,'logs',`${name}.log`),200000).slice(-80); for(const l of log){const m=l.match(/^\[([^\]]+)\] (.*)$/);if(m)events.push({ts:m[1],role:/order from/.test(m[2])?'order':'system',text:trunc(m[2])});} } catch {}
   if (!isAdmin) {
@@ -237,4 +277,4 @@ function feed(name, opts = {}) {
   return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,{...opts,limit})};
 }
 if(require.main===module){const [name,...args]=process.argv.slice(2);const li=args.indexOf('--limit');const limit=li>=0?Number(args[li+1]):undefined;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
-module.exports={feed,parseClaude,parseAdminClaude,parseCodex,parseKiro,redact,tail,tailUseful,selectEvents,cleanOrder,printable};
+module.exports={feed,parseClaude,parseAdminClaude,parseCodex,parseKiro,parseAgy,parseCursor,parseQwen,redact,tail,tailUseful,selectEvents,cleanOrder,printable};

@@ -90,7 +90,7 @@ function agentCard(agent) {
   identity.append(identityMain);
   const labels = element('div', 'identity-labels');
   if (agent.role === 'admin') labels.append(element('span', 'badge badge-admin', 'Admin'));
-  labels.append(element('span', `badge badge-${agent.kind}`, agent.kind === 'kiro' ? '✦ Kiro' : agent.kind));
+  labels.append(element('span', `badge badge-${agent.kind}`, agent.kind === 'kiro' ? '✦ Kiro' : agent.kind === 'antigravity' ? '◆ Antigravity' : agent.kind === 'cursor' ? '▲ Cursor' : agent.kind === 'qwen' ? '◈ Qwen' : agent.kind));
   if (agent.context !== null && agent.context > 40) labels.append(element('span', 'badge badge-warning', 'Compactará'));
   if (agent.tier === 'skip') labels.append(element('span', 'badge badge-critical', 'Skip'));
   identity.append(labels);

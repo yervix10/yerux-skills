@@ -64,6 +64,27 @@ function Ab-Install-Kiro($d, $n) {
     $steering = Join-Path $d 'steering'; Ensure-Dir $steering; Ensure-Dir (Join-Path $BR "inbox\$n")
     if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $steering 'agent-bridge.md') -Force }
     $ag = Join-Path $steering 'AGENTS.md'; Strip-Block $ag; Write-Text $ag ((Read-Text $ag) + "`n" + (Agents-Block $n)) }
+# Antigravity (agy): global rules in <HOME>\.gemini\config\AGENTS.md, where HOME is derived from the account dir (...\.gemini\antigravity-cli).
+function Agy-Cfg($d) { $x = $d.TrimEnd('\', '/'); if ($x -match '^(.*)[\\/]\.gemini[\\/]antigravity-cli$') { $h = $Matches[1] } elseif (Test-Path (Join-Path $x '.gemini')) { $h = $x } else { $h = $UserHome }; return (Join-Path $h '.gemini\config') }
+function Ab-Install-Agy($d, $n) {
+    $cfg = Agy-Cfg $d; Ensure-Dir (Join-Path $cfg 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'antigravity'
+    if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $cfg 'skills\agent-bridge\SKILL.md') -Force }
+    $ag = Join-Path $cfg 'AGENTS.md'; Strip-Block $ag; Write-Text $ag ((Read-Text $ag) + "`n" + (Agents-Block $n)) }
+function Ab-Uninstall-Agy($d) {
+  $cfg = Agy-Cfg $d; Remove-Item (Join-Path $cfg 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $cfg 'AGENTS.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
+# Cursor CLI (cursor-agent, workers only; never install or call a bare `agent`: here `agent` is the bridge command) and Qwen Code (qwen, workers only).
+function Ab-Install-Cursor($d, $n) {
+    Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'cursor'
+    if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $d 'skills\agent-bridge\SKILL.md') -Force } }
+function Ab-Uninstall-Cursor($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
+function Ab-Install-Qwen($d, $n) {
+    Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'qwen'
+    if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $d 'skills\agent-bridge\SKILL.md') -Force }
+    $q = Join-Path $d 'QWEN.md'; Strip-Block $q; Write-Text $q ((Read-Text $q) + "`n" + (Agents-Block $n)) }
+function Ab-Uninstall-Qwen($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $d 'QWEN.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
+# Cursor-Agent-Clash: true when the `agent` found on PATH is Cursor's (not the bridge's)
+function Cursor-Agent-Clash { $c = Get-Command agent -ErrorAction SilentlyContinue; if (-not $c) { return $false }; $src = [string]$c.Source
+  if ($src -match 'claude-bridge|agent-bridge') { return $false }; return ($src -match 'cursor') }
 function Ab-Uninstall-Claude($d) {
   Del-Hooks (Join-Path $d 'settings.json')
   $s = Join-Path $d 'settings.json'

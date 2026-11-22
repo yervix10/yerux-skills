@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 (unreleased)
+- New worker types: **Antigravity** (`agy-N`, `agy -p`), **Cursor CLI** (`cursor-N`, `cursor-agent -p`) and **Qwen Code** (`qwen-N`, `qwen "<order>"`),
+  with the Kiro pattern: provider marker, runner (resume by session id, handoff compaction, LIMIT/API ERROR classification, live feed and
+  activity), model validation, dashboard/widget kinds, installers (`--agy-dir`, `--cursor-dir`, `--qwen-dir`, check/fix/uninstall) on Linux/macOS and Windows.
+- Cursor workers always call `cursor-agent`, never `agent` (the bridge command). The installers warn when Cursor's own `agent` shadows the bridge's.
+- Cursor and Qwen have no quota data or effort flag (tier `normal`, `agent effort` refused); context % is estimated from token usage.
+- Tests with fake `agy`, `cursor-agent` and `qwen`.
+
 ## 1.3.0
 - `agent dashboard` shows per agent what the Claude status line shows: model, project, branch, context %, 5h and weekly usage
   (coloured by how full they are) plus the worker state. Codex agents: read from their latest session file

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # bridge-runner <name>: terminal-less worker. Waits for the admin's orders in its inbox, runs them with
-# `claude -p` / `codex exec` (with memory: resumes the conversation per working directory) and replies to the admin.
+# `claude -p` / `codex exec` / `kiro-cli chat` / `agy -p` / `cursor-agent -p` / `qwen` (with memory: resumes the conversation per working directory) and replies to the admin.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-runner <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"
 [ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
 kind="$("$(dirname "$0")/bridge-provider" "$dir")" || { echo "unknown type: $dir" >&2; exit 1; }
+AGY_HOME="$HOME"; [ "$kind" = antigravity ] && AGY_HOME="$("$(dirname "$0")/bridge-agy-home" "$dir")"
+# Cursor / Qwen Code: the account dir (.cursor / .qwen) maps to the HOME that owns it. NEVER call a bare `agent` for Cursor: here `agent` is the bridge command.
+ACC_HOME="$HOME"; case "$kind" in cursor|qwen) ACC_HOME="$("$(dirname "$0")/bridge-account-home" "$dir")";; esac
 mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/notes" "$B/runs"
 chmod 600 "$B/admin" 2>/dev/null || true
 for live_file in "$B"/logs/*.live; do [ -e "$live_file" ] && chmod 600 "$live_file"; done
@@ -24,6 +27,12 @@ CLAUDE_PERM=(); CODEX_PERM_NEW=(-s workspace-write); CODEX_PERM_RES=(-c sandbox_
 # BRIDGE_BYPASS=safe: Claude may edit files but not run arbitrary commands without approval; Codex stays in its workspace-write sandbox.
 if [ "$BYPASS" = safe ]; then CLAUDE_PERM=(--permission-mode acceptEdits); fi
 if [ "$BYPASS" = 1 ]; then CLAUDE_PERM=(--dangerously-skip-permissions); CODEX_PERM_NEW=(--dangerously-bypass-approvals-and-sandbox); CODEX_PERM_RES=(--dangerously-bypass-approvals-and-sandbox); fi
+# Antigravity (agy): bypass=1 skips every permission prompt; safe lets it edit files (accept-edits); 0 runs in plan mode (read-only).
+AGY_PERM=(--dangerously-skip-permissions); [ "$BYPASS" = safe ] && AGY_PERM=(--mode accept-edits); [ "$BYPASS" = 0 ] && AGY_PERM=(--mode plan)
+# Cursor (cursor-agent): bypass=1 runs everything (--force); safe edits files but shell commands stay denied; 0 = plan mode (read-only).
+CURSOR_PERM=(--force --trust); [ "$BYPASS" = safe ] && CURSOR_PERM=(--trust); [ "$BYPASS" = 0 ] && CURSOR_PERM=(--trust --mode plan)
+# Qwen Code: bypass=1 = yolo; safe = auto-edit (edits yes, shell asks, which headless means denied); 0 = plan (read-only).
+QWEN_PERM=(--approval-mode yolo); [ "$BYPASS" = safe ] && QWEN_PERM=(--approval-mode auto-edit); [ "$BYPASS" = 0 ] && QWEN_PERM=(--approval-mode plan)
 log "bypass=$BYPASS"
 # ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
 ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"
@@ -41,6 +50,10 @@ act() { [ -s "$LIVE" ] || return 0
     S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="item.started" or .type=="item.completed")|.item|select(.type!="agent_message" and .type!="reasoning")|"\(.type) \((.command // .path // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   elif [ "$kind" = kiro ]; then
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="sessionUpdate")|.data.update as $u|select($u.sessionUpdate=="tool_call")|"\($u.title // $u.toolCall.name // "herramienta") \(($u.toolCall.rawInput // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = antigravity ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.event=="step_update")|.step_update|select(.step_type=="tool" and .state=="ACTIVE")|"\(.tool_name // "tool") \((.tool_info.parameters // {})|(.CommandLine // .AbsolutePath // .Query // .TargetFile // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = cursor ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="tool_call" and .subtype=="started")|.tool_call|to_entries[0]|"\(.key|sub("ToolCall$";"")) \((.value.args // {})|(.command // .path // .pattern // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   else
   S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="assistant")|.message.content[]?|select(.type=="tool_use")|"\(.name) \((.input.command // .input.file_path // .input.pattern // .input.description // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   fi
@@ -63,12 +76,28 @@ supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
       log "still working after $((el / 60)) min: $S_ORDER"
       notify_admin "ALERT: worker '$name' has been on the same order for $(if [ $el -ge 120 ]; then echo "$((el / 60)) min"; else echo "${el}s"; fi) and has not replied yet (still running, not killed). Order: $S_ORDER. Check: agent status | agent logs $name | agent reset $name"; fi; done
   wait "$pid"; local rc=$?; CHILD=""; return $rc; }
+# agy_window: context window (tokens) assumed for the selected Antigravity model (BRIDGE_AGY_WINDOW overrides)
+agy_window() { local m; [[ "${BRIDGE_AGY_WINDOW:-}" =~ ^[0-9]+$ ]] && { echo "$BRIDGE_AGY_WINDOW"; return; }
+  m="$(cat "$B/models/$name" 2>/dev/null)"; case "$m" in claude*) echo 200000;; gpt-oss*) echo 128000;; *) echo 1000000;; esac; }
+# cq_window: context window (tokens) assumed for Cursor / Qwen (BRIDGE_CURSOR_WINDOW / BRIDGE_QWEN_WINDOW override; 1M-marked Cursor models get 1000000)
+cq_window() { local v m; if [ "$kind" = qwen ]; then v="${BRIDGE_QWEN_WINDOW:-}"; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }; echo 256000; return; fi
+  v="${BRIDGE_CURSOR_WINDOW:-}"; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }
+  m="$(cat "$B/models/$name" 2>/dev/null)"; case "$m" in *1m*|*sol*|*fable*|*opus-5*) echo 1000000;; *) echo 200000;; esac; }
 # ctx_now: context used (%) by this worker, as of the end of its previous order (empty when unknown)
 ctx_now() { local used win
   if [ "$kind" = claude ]; then [ -s "$LIVE" ] || return 0
     used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0)+(.cache_creation_input_tokens // 0))' "$LIVE" 2>/dev/null | tail -1)"
     win="$(jq -r 'select(.type=="result")|.modelUsage|to_entries[0].value.contextWindow // empty' "$LIVE" 2>/dev/null | tail -1)"
     [ -n "$used" ] && [ -n "$win" ] && [ "$win" -gt 0 ] 2>/dev/null && echo $((used * 100 / win))
+  elif [ "$kind" = antigravity ]; then # no context meter in agy: estimate from the last model call's tokens vs. the model's window
+    [ -s "$LIVE" ] || return 0
+    used="$(jq -r 'select(.event=="step_update")|.step_update|select(.step_type=="agent_response" and .state=="DONE" and .usage!=null)|(.usage.input_tokens + .usage.cache_read_tokens + .usage.output_tokens)' "$LIVE" 2>/dev/null | tail -1)"
+    win="$(agy_window)"; [[ "$used" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((used * 100 / win))
+  elif [ "$kind" = cursor ] || [ "$kind" = qwen ]; then # no context meter: estimate from the last call's input tokens vs. the model window
+    [ -s "$LIVE" ] || return 0
+    if [ "$kind" = qwen ]; then used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0))' "$LIVE" 2>/dev/null | tail -1)"
+    else used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$LIVE" 2>/dev/null | tail -1)"; fi
+    win="$(cq_window)"; [[ "$used" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((used * 100 / win))
   elif [ "$kind" = kiro ]; then
     local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
     f="$(find "$dir/sessions" -path "*/$sess/messages.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
@@ -108,6 +137,29 @@ maybe_compact() { local force="${1:-0}" c rc=0 out hf; [ -f "$sf" ] || return 0
   if [ "$kind" = claude ]; then
     ( cd "$cwd" && export CLAUDE_CONFIG_DIR="$dir" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name"; if [ "$COMPACT_AT" -gt 0 ]; then export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="$COMPACT_AT"; else unset CLAUDE_AUTOCOMPACT_PCT_OVERRIDE; fi; run_to 900 claude -p --output-format stream-json --verbose "${MODEL_ARGS[@]}" "${CLAUDE_COMPACT_ARGS[@]}" "${CLAUDE_PERM[@]}" --resume "$(cat "$sf")" "/compact" ) > "$B/logs/$name.compact" 2>&1 < /dev/null & supervise $! || rc=$?
     if grep -q compact_boundary "$B/logs/$name.compact" 2>/dev/null; then log "compacted (was ${c}%)"; else log "compaction failed (rc=$rc), continuing without it"; fi
+  elif [ "$kind" = antigravity ]; then
+    out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
+    ( cd "$cwd" && HOME="$AGY_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 agy -p "Your context is nearly full and this conversation is about to be replaced by a fresh one. Reply ONLY with a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Do not run tools." --output-format json "${MODEL_ARGS[@]}" --conversation "$(cat "$sf")" < /dev/null ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
+    jq -r '.response // empty' "$B/logs/$name.compact" 2>/dev/null > "$out"
+    if [ "$rc" = 0 ] && [ -s "$out" ]; then cp "$out" "$hf"; rm -f "$sf"; prompt="$prompt
+
+[Handoff summary from the previous Antigravity conversation:]
+$(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed (rc=$rc), continuing without compaction"; fi
+    rm -f "$out"
+  elif [ "$kind" = cursor ] || [ "$kind" = qwen ]; then
+    out="$(mktemp)"; hf="$B/notes/$name.handoff.md"; local hp="Your context is nearly full and this conversation is about to be replaced by a fresh one. Reply ONLY with a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Do not run tools."
+    if [ "$kind" = cursor ]; then
+      ( cd "$cwd" && HOME="$ACC_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 cursor-agent -p "$hp" --output-format json --trust --mode ask "${MODEL_ARGS[@]}" --resume "$(cat "$sf")" < /dev/null ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
+      jq -r 'select(.type=="result")|.result // empty' "$B/logs/$name.compact" 2>/dev/null | tail -1 > "$out"
+    else
+      ( cd "$cwd" && HOME="$ACC_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 qwen "$hp" --output-format json --approval-mode plan "${MODEL_ARGS[@]}" --resume "$(cat "$sf")" < /dev/null ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
+      jq -rs '[.[]|arrays[]?,objects]|map(select(.type=="result"))|last|.result // empty' "$B/logs/$name.compact" 2>/dev/null > "$out"
+    fi
+    if [ "$rc" = 0 ] && [ -s "$out" ]; then cp "$out" "$hf"; rm -f "$sf"; prompt="$prompt
+
+[Handoff summary from the previous $kind conversation:]
+$(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed (rc=$rc), continuing without compaction"; fi
+    rm -f "$out"
   elif [ "$kind" = kiro ]; then
     out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
     ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 kiro-cli chat --no-interactive --trust-all-tools --trust-workspace --output-format stream-json "${MODEL_ARGS[@]}" --resume-id "$(cat "$sf")" "Your context is nearly full. Write a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Return only the handoff; do not run tools." ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
@@ -147,8 +199,8 @@ manual_compact() {
   fi
   [ -d "$cwd" ] || { log "manual compaction unavailable: saved project directory is missing or unknown"; return 1; }
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"; eff="$(cat "$B/effort/$name" 2>/dev/null)"
-  if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro) MODEL_ARGS=(--model "$mdl");; esac; fi
-  if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro|antigravity|cursor) MODEL_ARGS=(--model "$mdl");; qwen) MODEL_ARGS=(-m "$mdl");; esac; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   add_codex_compact_arg
   log "manual compaction requested"; maybe_compact 1
   return 0
@@ -165,8 +217,8 @@ REASSIGN="${BRIDGE_REASSIGN:-$(sed -n 's/^REASSIGN=//p' "$B/config" 2>/dev/null 
 classify() { local rc="$1" low; low="$(printf '%s' "$2" | tr 'A-Z' 'a-z')"
   [ "$rc" = 124 ] && { echo timeout; return; }
   if [ "$rc" != 0 ]; then
-    case "$low" in *"usage limit"*|*"rate limit"*|*"rate_limit"*|*"limit reached"*|*"hit your limit"*|*quota*|*"too many requests"*|*"credit balance"*|*"limit will reset"*|*"resets at"*|*"resets in"*) echo limit; return;;
-      *overloaded*|*"api error"*|*"authentication"*|*"invalid api key"*|*"invalid x-api-key"*|*econnrefused*|*econnreset*|*"network error"*|*"503"*|*"529"*|*"502"*|*"401"*|*unauthorized*) echo api; return;; esac
+    case "$low" in *"usage limit"*|*"rate limit"*|*"rate_limit"*|*"limit reached"*|*"hit your limit"*|*quota*|*"too many requests"*|*"credit balance"*|*resource_exhausted*|*"resource exhausted"*|*"429"*|*"out of credits"*|*"quota exceeded"*|*"limit will reset"*|*"resets at"*|*"resets in"*) echo limit; return;;
+      *overloaded*|*"api error"*|*"authentication"*|*"not signed in"*|*"not logged in"*|*"sign in"*|*"invalid api key"*|*"invalid x-api-key"*|*econnrefused*|*econnreset*|*"network error"*|*"503"*|*"529"*|*"502"*|*"401"*|*unauthorized*) echo api; return;; esac
     echo error; return; fi
   if [ ${#2} -lt 300 ]; then case "$low" in *"usage limit"*|*"rate limit"*|*"limit reached"*|*"hit your limit"*) echo limit; return;; esac; fi
   echo ok; }
@@ -217,14 +269,14 @@ while true; do
 
 Order:
 $body"
-  if [ "$kind" = kiro ]; then prompt="$prompt
+  if [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = qwen ]; then prompt="$prompt
 
 Do not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text."; fi
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
-  if [ -n "$mdl" ]; then case "$kind" in claude|kiro) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; esac; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude|kiro|antigravity|cursor) MODEL_ARGS=(--model "$mdl");; codex|qwen) MODEL_ARGS=(-m "$mdl");; esac; fi
   eff="$(cat "$B/effort/$name" 2>/dev/null)"   # reasoning effort, also set by the admin (`agent effort`)
-  if [ -n "$eff" ]; then case "$kind" in claude|kiro) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   add_codex_compact_arg
   maybe_compact
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
@@ -252,6 +304,37 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     errs="$(jq -r '(select(.type=="error")|.message), (select(.type=="turn.failed")|.error.message)' "$LIVE" 2>/dev/null | tr '\n' ' ')"
     [ -n "$errs" ] && [ "$rc" = 0 ] && ! [ -s "$out" ] && rc=1
     cat "$out" > "$tmp" 2>/dev/null; [ -s "$tmp" ] || { printf '%s\n' "$errs"; cat "$LIVE.err"; } | tail -c 2000 > "$tmp"; rm -f "$out"
+  elif [ "$kind" = cursor ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    session_args=(); [ -f "$sf" ] && session_args=(--resume "$(cat "$sf")")
+    ( cd "$cwd" || exit 1; HOME="$ACC_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" cursor-agent -p "$prompt" --output-format stream-json "${CURSOR_PERM[@]}" "${MODEL_ARGS[@]}" "${session_args[@]}" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
+    jq -r 'select(.type=="result")|.result // empty' "$LIVE" 2>/dev/null > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
+    id="$(jq -r 'select(.type=="result")|.session_id // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+    RESET_AT=""
+  elif [ "$kind" = qwen ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    session_args=(); [ -f "$sf" ] && session_args=(--resume "$(cat "$sf")")
+    ( cd "$cwd" || exit 1; HOME="$ACC_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" QWEN_CODE_SUPPRESS_YOLO_WARNING=1 run_to "$TMO" qwen "$prompt" --output-format stream-json "${QWEN_PERM[@]}" "${MODEL_ARGS[@]}" "${session_args[@]}" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    iserr="$(jq -r 'select(.type=="result")|.is_error' "$LIVE" 2>/dev/null | tail -1)"; [ "$iserr" = true ] && [ "$rc" = 0 ] && rc=1
+    jq -r 'select(.type=="result")|(.result // .error.message // empty)' "$LIVE" 2>/dev/null > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
+    id="$(jq -r 'select(.type=="result")|.session_id // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+    RESET_AT=""
+  elif [ "$kind" = antigravity ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    session_args=(); [ -f "$sf" ] && session_args=(--conversation "$(cat "$sf")")
+    ( cd "$cwd" || exit 1; HOME="$AGY_HOME" BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" agy -p "$prompt" --output-format stream-json "${AGY_PERM[@]}" "${MODEL_ARGS[@]}" "${session_args[@]}" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    status="$(jq -r 'select(.event=="result")|.result.status // empty' "$LIVE" 2>/dev/null | tail -1)"
+    { [ -n "$status" ] && [ "$status" != SUCCESS ]; } && [ "$rc" = 0 ] && rc=1
+    jq -r 'select(.event=="result")|.result.response // empty' "$LIVE" 2>/dev/null > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
+    id="$(jq -r 'select(.event=="result")|.result.conversation_id // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+    RESET_AT=""
   else
     : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     session_args=(); [ -f "$sf" ] && session_args=(--resume-id "$(cat "$sf")")

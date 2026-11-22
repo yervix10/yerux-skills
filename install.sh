@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# yerux-skills installer (Linux, macOS, WSL): finds Claude Code / Codex / Kiro CLI accounts and installs the featured package
+# yerux-skills installer (Linux, macOS, WSL): finds Claude Code / Codex / Kiro CLI / Google Antigravity (agy) / Cursor CLI / Qwen Code accounts and installs the featured package
 # (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
-# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--no-statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]... [--kiro-dir DIR]...
+# Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--no-statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]... [--kiro-dir DIR]... [--agy-dir DIR]... [--cursor-dir DIR]... [--qwen-dir DIR]...
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
-DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""
+DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; QWEN_LIST=""
 YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
@@ -27,6 +27,12 @@ $2"; shift;;
   --codex-dir) [ -n "${2:-}" ] || die "--codex-dir needs a path"; CODEX_LIST="$CODEX_LIST
 $2"; shift;;
   --kiro-dir) [ -n "${2:-}" ] || die "--kiro-dir needs a path"; KIRO_LIST="$KIRO_LIST
+$2"; shift;;
+  --agy-dir) [ -n "${2:-}" ] || die "--agy-dir needs a path (e.g. ~/.gemini/antigravity-cli)"; AGY_LIST="$AGY_LIST
+$2"; shift;;
+  --cursor-dir) [ -n "${2:-}" ] || die "--cursor-dir needs a path (e.g. ~/.cursor)"; CURSOR_LIST="$CURSOR_LIST
+$2"; shift;;
+  --qwen-dir) [ -n "${2:-}" ] || die "--qwen-dir needs a path (e.g. ~/.qwen)"; QWEN_LIST="$QWEN_LIST
 $2"; shift;;
   -h|--help) sed -n '2,9p' "$0"; exit 0;;
   *) die "unknown option: $1";; esac; shift; done
@@ -62,6 +68,9 @@ add_dir() { # kind dir
   [ "$(basename "$d")" = ".claude-bridge" ] && return 0
   if [ "$1" = claude ]; then has_line "$CLAUDE_LIST" "$d" || CLAUDE_LIST="$CLAUDE_LIST
 $d"; elif [ "$1" = codex ]; then has_line "$CODEX_LIST" "$d" || CODEX_LIST="$CODEX_LIST
+$d"; elif [ "$1" = antigravity ]; then has_line "$AGY_LIST" "$d" || AGY_LIST="$AGY_LIST
+$d"; elif [ "$1" = cursor ]; then has_line "$CURSOR_LIST" "$d" || CURSOR_LIST="$CURSOR_LIST
+$d"; elif [ "$1" = qwen ]; then has_line "$QWEN_LIST" "$d" || QWEN_LIST="$QWEN_LIST
 $d"; else has_line "$KIRO_LIST" "$d" || KIRO_LIST="$KIRO_LIST
 $d"; fi; }
 # normalize user-given dirs
@@ -74,6 +83,15 @@ EOF2
 tmp="$KIRO_LIST"; KIRO_LIST=""; while IFS= read -r d; do [ -n "$d" ] && add_dir kiro "$d"; done <<EOF2
 $tmp
 EOF2
+tmp="$AGY_LIST"; AGY_LIST=""; while IFS= read -r d; do [ -n "$d" ] && add_dir antigravity "$d"; done <<EOF2
+$tmp
+EOF2
+tmp="$CURSOR_LIST"; CURSOR_LIST=""; while IFS= read -r d; do [ -n "$d" ] && add_dir cursor "$d"; done <<EOF2
+$tmp
+EOF2
+tmp="$QWEN_LIST"; QWEN_LIST=""; while IFS= read -r d; do [ -n "$d" ] && add_dir qwen "$d"; done <<EOF2
+$tmp
+EOF2
 # default folders and ~/.claude-* / ~/.codex-* by name pattern
 for d in "$HOME/.claude" "$HOME"/.claude-*; do
   [ -d "$d" ] || continue
@@ -82,6 +100,11 @@ for d in "$HOME/.codex" "$HOME"/.codex-*; do
   [ -d "$d" ] || continue
   for m in auth.json config.toml hooks.json sessions; do [ -e "$d/$m" ] && { add_dir codex "$d"; break; }; done; done
 if command -v kiro-cli >/dev/null 2>&1 || [ -x "$HOME/.local/bin/kiro-cli" ] || [ -d "$HOME/.kiro/sessions" ]; then add_dir kiro "$HOME/.kiro"; fi
+# Google Antigravity: one account per HOME (~/.gemini/antigravity-cli); the `agy` CLI keeps its sign-in in the system, not in that folder
+if command -v agy >/dev/null 2>&1 || [ -x "$HOME/.local/bin/agy" ] || [ -d "$HOME/.gemini/antigravity-cli" ]; then [ "$DRY" = 1 ] || mkdir -p "$HOME/.gemini/antigravity-cli" 2>/dev/null || true; add_dir antigravity "$HOME/.gemini/antigravity-cli"; fi
+# Cursor CLI (binary `cursor-agent`; never the bare `agent`) and Qwen Code (`qwen`): one account per HOME (~/.cursor, ~/.qwen)
+if command -v cursor-agent >/dev/null 2>&1 || [ -x "$HOME/.local/bin/cursor-agent" ] || [ -d "$HOME/.cursor/chats" ]; then [ -d "$HOME/.cursor" ] && add_dir cursor "$HOME/.cursor"; fi
+if command -v qwen >/dev/null 2>&1 || [ -x "$HOME/.local/bin/qwen" ] || [ -d "$HOME/.qwen" ]; then [ -d "$HOME/.qwen" ] && add_dir qwen "$HOME/.qwen"; fi
 # current environment
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] && add_dir claude "$CLAUDE_CONFIG_DIR"
 [ -n "${CODEX_HOME:-}" ] && add_dir codex "$CODEX_HOME"
@@ -95,7 +118,7 @@ for rc in "$HOME/.bashrc" "$HOME/.bash_aliases" "$HOME/.bash_profile" "$HOME/.pr
 $(grep -v '^[[:space:]]*#' "$rc" | grep -Eo "$v[= ][^[:space:];&|)]+" | sed -E "s/^$v[= ]//")
 EOF2
   done; done
-CLAUDE_LIST="$(printf '%s\n' "$CLAUDE_LIST" | sed '/^$/d' | sort -u)"; CODEX_LIST="$(printf '%s\n' "$CODEX_LIST" | sed '/^$/d' | sort -u)"; KIRO_LIST="$(printf '%s\n' "$KIRO_LIST" | sed '/^$/d' | sort -u)"
+CLAUDE_LIST="$(printf '%s\n' "$CLAUDE_LIST" | sed '/^$/d' | sort -u)"; CODEX_LIST="$(printf '%s\n' "$CODEX_LIST" | sed '/^$/d' | sort -u)"; KIRO_LIST="$(printf '%s\n' "$KIRO_LIST" | sed '/^$/d' | sort -u)"; AGY_LIST="$(printf '%s\n' "$AGY_LIST" | sed '/^$/d' | sort -u)"; CURSOR_LIST="$(printf '%s\n' "$CURSOR_LIST" | sed '/^$/d' | sort -u)"; QWEN_LIST="$(printf '%s\n' "$QWEN_LIST" | sed '/^$/d' | sort -u)"
 
 # ---------- names (names.conf lines: DIR=NAME; existing names are kept) ----------
 conf="$BR/names.conf"; MAP=""; [ -f "$conf" ] && MAP="$(cat "$conf")"
@@ -121,6 +144,15 @@ EOF2
 while IFS= read -r d; do [ -n "$d" ] && assign "$d" kiro; done <<EOF2
 $KIRO_LIST
 EOF2
+while IFS= read -r d; do [ -n "$d" ] && assign "$d" agy; done <<EOF2
+$AGY_LIST
+EOF2
+while IFS= read -r d; do [ -n "$d" ] && assign "$d" cursor; done <<EOF2
+$CURSOR_LIST
+EOF2
+while IFS= read -r d; do [ -n "$d" ] && assign "$d" qwen; done <<EOF2
+$QWEN_LIST
+EOF2
 
 if [ "$MODE" = list ]; then
   say "system: $OS"
@@ -132,6 +164,15 @@ $CODEX_LIST
 EOF2
   while IFS= read -r d; do [ -n "$d" ] && say "kiro    $(get_name "$d")  $d"; done <<EOF2
 $KIRO_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] && say "agy     $(get_name "$d")  $d"; done <<EOF2
+$AGY_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] && say "cursor  $(get_name "$d")  $d"; done <<EOF2
+$CURSOR_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] && say "qwen    $(get_name "$d")  $d"; done <<EOF2
+$QWEN_LIST
 EOF2
   exit 0; fi
 
@@ -199,11 +240,12 @@ acc_refresh() { local i=0; while [ $i -lt $MS_N ]; do MS_L[$i]="$(get_name "${AC
 acc_cb() { case "$1" in
   r) ui_cursor_on; printf '\n  %s%s%s new name for %s: ' "$CYN" "$S_ARROW" "$RST" "${MS_L[$MS_CUR]}"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; MS_EXTRA=2
      case "$REPLY" in ""|*[!A-Za-z0-9_-]*) ;; *) if printf '%s\n' "$MAP" | awk -F= -v k="${ACC_DIR[$MS_CUR]}" -v v="$REPLY" '$1!=k && $2==v{f=1} END{exit !f}'; then :; else set_name "${ACC_DIR[$MS_CUR]}" "$REPLY"; acc_refresh; fi;; esac;;
-  +) ui_cursor_on; printf '\n  %s%s%s type (claude/codex/kiro): ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r kind <&3 || kind=""
+  +) ui_cursor_on; printf '\n  %s%s%s type (claude/codex/kiro/agy/cursor/qwen): ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r kind <&3 || kind=""
      printf '  %s%s%s folder: ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; MS_EXTRA=3
      local p; p="$(norm "$REPLY")" || p=""
-     if { [ "$kind" = claude ] || [ "$kind" = codex ] || [ "$kind" = kiro ]; } && [ -n "$p" ] && [ -d "$p" ]; then
-       assign "$p" "$([ "$kind" = claude ] && echo agent || echo "$kind")"
+     [ "$kind" = agy ] && kind=antigravity
+     if { [ "$kind" = claude ] || [ "$kind" = codex ] || [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = qwen ]; } && [ -n "$p" ] && [ -d "$p" ]; then
+       assign "$p" "$([ "$kind" = claude ] && echo claude || { [ "$kind" = antigravity ] && echo agy || echo "$kind"; })"
        ACC_KIND[$MS_N]="$kind"; ACC_DIR[$MS_N]="$p"; MS_ON[$MS_N]=1; MS_F[$MS_N]=0; MS_N=$((MS_N+1)); acc_refresh; fi;;
   esac; }
 keys() { local o="" k; for k in "$@"; do o="$o${CYN}${BOLD}${k%% *}${RST} ${DIM}${k#* }${RST}   "; done; printf '  %s\n' "$o"; }
@@ -228,9 +270,18 @@ EOF2
   while IFS= read -r d; do [ -n "$d" ] && { ACC_KIND[$MS_N]=kiro; ACC_DIR[$MS_N]="$d"; MS_ON[$MS_N]=1; MS_N=$((MS_N+1)); }; done <<EOF2
 $KIRO_LIST
 EOF2
+  while IFS= read -r d; do [ -n "$d" ] && { ACC_KIND[$MS_N]=antigravity; ACC_DIR[$MS_N]="$d"; MS_ON[$MS_N]=1; MS_N=$((MS_N+1)); }; done <<EOF2
+$AGY_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] && { ACC_KIND[$MS_N]=cursor; ACC_DIR[$MS_N]="$d"; MS_ON[$MS_N]=1; MS_N=$((MS_N+1)); }; done <<EOF2
+$CURSOR_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] && { ACC_KIND[$MS_N]=qwen; ACC_DIR[$MS_N]="$d"; MS_ON[$MS_N]=1; MS_N=$((MS_N+1)); }; done <<EOF2
+$QWEN_LIST
+EOF2
   acc_refresh
   ACC_N=$MS_N; ACC_ONS=("${MS_ON[@]}")
-  PK_ON=(); PK_L=("agent-bridge"); PK_S=("Claude Code + Codex + Kiro CLI sessions that talk to each other"); PK_ON[0]=1
+  PK_ON=(); PK_L=("agent-bridge"); PK_S=("Claude Code + Codex + Kiro + Antigravity + Cursor + Qwen sessions that talk to each other"); PK_ON[0]=1
   i=0; while [ $i -lt ${#SK_NAMES[@]} ]; do PK_L[$((i+1))]="${SK_NAMES[$i]}"; PK_S[$((i+1))]="${SK_DESC[$i]}"; PK_ON[$((i+1))]=0; i=$((i+1)); done
   OPT_ON=(1 1 1 1)
   info_wait() { local k; ui_cursor_off; while :; do IFS= read -rsn1 -u 3 k || k=""; case "$k" in "") ui_cursor_on; return 0;; b|B) ui_cursor_on; MS_BACK=1; return 0;; e|E) if [ "${MS_EDITABLE:-0}" = 1 ]; then ui_cursor_on; MS_EDIT=1; return 0; fi;; esac; done; }
@@ -248,13 +299,16 @@ EOF2
       step=2;;
     2) # --- accounts (info) ---
       menu_screen 2 "e edit" "b back" "enter continue"; echo "  ${DIM}Detected accounts; all of them will be configured${RST}"; echo
-      CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; i=0
+      CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; QWEN_LIST=""; i=0
       while [ $i -lt $ACC_N ]; do
         [ "${ACC_ONS[$i]}" = 1 ] || { i=$((i+1)); continue; }
         info_row "$(get_name "${ACC_DIR[$i]}")" "${ACC_KIND[$i]}" "$(tilde "${ACC_DIR[$i]}")"
         case "${ACC_KIND[$i]}" in claude) CLAUDE_LIST="$CLAUDE_LIST
 ${ACC_DIR[$i]}";; codex) CODEX_LIST="$CODEX_LIST
 ${ACC_DIR[$i]}";; kiro) KIRO_LIST="$KIRO_LIST
+${ACC_DIR[$i]}";; antigravity) AGY_LIST="$AGY_LIST
+${ACC_DIR[$i]}";; cursor) CURSOR_LIST="$CURSOR_LIST
+${ACC_DIR[$i]}";; qwen) QWEN_LIST="$QWEN_LIST
 ${ACC_DIR[$i]}";; esac; i=$((i+1)); done
       echo; MS_BACK=0; MS_EDIT=0; MS_EDITABLE=1; info_wait; MS_EDITABLE=0
       [ $MS_BACK = 1 ] && { step=1; continue; }
@@ -271,12 +325,12 @@ ${ACC_DIR[$i]}";; esac; i=$((i+1)); done
       [ $MS_BACK = 1 ] && { step=2; continue; }
       step=4;;
     4) # --- confirm ---
-      local nc nx nk pk opts; nc=$(printf '%s\n' "$CLAUDE_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nx=$(printf '%s\n' "$CODEX_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nk=$(printf '%s\n' "$KIRO_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
-      NACC=$((nc + nx + nk)); pk="$SEL_SKILLS"; [ "$PKG_AB" = 1 ] && pk="agent-bridge $pk"; pk="$(printf '%s' "$pk" | sed 's/ *$//; s/ /, /g')"; [ -n "$pk" ] || pk="none"
+      local nc nx nk na ncu nqw pk opts; nc=$(printf '%s\n' "$CLAUDE_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nx=$(printf '%s\n' "$CODEX_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nk=$(printf '%s\n' "$KIRO_LIST" | sed '/^$/d' | wc -l | tr -d ' '); na=$(printf '%s\n' "$AGY_LIST" | sed '/^$/d' | wc -l | tr -d ' '); ncu=$(printf '%s\n' "$CURSOR_LIST" | sed '/^$/d' | wc -l | tr -d ' '); nqw=$(printf '%s\n' "$QWEN_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
+      NACC=$((nc + nx + nk + na + ncu + nqw)); pk="$SEL_SKILLS"; [ "$PKG_AB" = 1 ] && pk="agent-bridge $pk"; pk="$(printf '%s' "$pk" | sed 's/ *$//; s/ /, /g')"; [ -n "$pk" ] || pk="none"
       local npk; npk=$(printf '%s' "$pk" | tr ',' '\n' | sed '/^ *$/d' | wc -l | tr -d ' '); [ ${#pk} -gt 58 ] && pk="${pk:0:55}…  ${DIM}($npk packages)${RST}"
       menu_screen 4 "enter install" "n back"
       opts="skill+commands, hook"; [ "$OPT_STATUSLINE" = 1 ] && opts="$opts, status line data"; [ "$OPT_TRUST" = 1 ] && opts="$opts, auto-approve Codex hooks"; [ "$OPT_BYPASS" = 1 ] && opts="$opts, bypass workers"; [ "$OPT_BYPASS" = safe ] && opts="$opts, safe-mode workers"; [ "$OPT_PATH" = 1 ] && opts="$opts, PATH"
-      sl=("${DIM}Accounts     ${RST}${BOLD}$NACC${RST}  ${DIM}($nc claude · $nx codex · $nk kiro)${RST}" "${DIM}Packages     ${RST}$pk")
+      sl=("${DIM}Accounts     ${RST}${BOLD}$NACC${RST}  ${DIM}($nc claude · $nx codex · $nk kiro · $na agy · $ncu cursor · $nqw qwen)${RST}" "${DIM}Packages     ${RST}$pk")
       [ "$PKG_AB" = 1 ] && sl+=("${DIM}agent-bridge ${RST}$opts")
       ui_box "Summary" "${sl[@]}"
       yn "Install now?" 1 && break
@@ -322,7 +376,16 @@ chk_codex() { local d="$1" n out; n="$(get_name "$d")"
 chk_kiro() { local d="$1" n; n="$(get_name "$d")"
   if [ -f "$d/steering/AGENTS.md" ] && grep -q 'BRIDGE-BEGIN' "$d/steering/AGENTS.md"; then ok "Kiro    $n  steering"; else bad "Kiro    $n  steering missing ($(tilde "$d"))"; fi
   if [ -f "$d/steering/agent-bridge.md" ] && cmp -s "$d/steering/agent-bridge.md" "$SRC/SKILL.md"; then ok "Kiro    $n  skill up to date"; else bad "Kiro    $n  skill missing or outdated"; fi; }
-chk_scripts() { local x; for x in agent admin bridge-hook bridge-runner bridge-send bridge-wait bridge-whoami bridge-provider; do
+chk_antigravity() { local d="$1" n cfg; n="$(get_name "$d")"; cfg="$(agy_cfg "$d")"
+  if [ -f "$cfg/AGENTS.md" ] && grep -q 'BRIDGE-BEGIN' "$cfg/AGENTS.md"; then ok "Agy     $n  global rules"; else bad "Agy     $n  global rules missing ($(tilde "$cfg"))"; fi
+  if [ -f "$cfg/skills/agent-bridge/SKILL.md" ] && cmp -s "$cfg/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Agy     $n  skill up to date"; else bad "Agy     $n  skill missing or outdated"; fi; }
+chk_cursor() { local d="$1" n; n="$(get_name "$d")"
+  if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Cursor  $n  skill up to date"; else bad "Cursor  $n  skill missing or outdated"; fi
+  if cursor_agent_clash; then :; else bad "Cursor  $n  'agent' on PATH is Cursor's, not the bridge's: call cursor-agent and reinstall the bridge command (./install.sh)"; fi; }
+chk_qwen() { local d="$1" n; n="$(get_name "$d")"
+  if [ -f "$d/QWEN.md" ] && grep -q 'BRIDGE-BEGIN' "$d/QWEN.md"; then ok "Qwen    $n  QWEN.md"; else bad "Qwen    $n  QWEN.md block missing ($(tilde "$d"))"; fi
+  if [ -f "$d/skills/agent-bridge/SKILL.md" ] && cmp -s "$d/skills/agent-bridge/SKILL.md" "$SRC/SKILL.md"; then ok "Qwen    $n  skill up to date"; else bad "Qwen    $n  skill missing or outdated"; fi; }
+chk_scripts() { local x; for x in agent admin bridge-hook bridge-runner bridge-send bridge-wait bridge-whoami bridge-provider bridge-agy-home bridge-account-home; do
     if [ -x "$BR/bin/$x" ]; then ok "script $x"; else bad "script $x missing or broken in $(tilde "$BR/bin")"; fi; done; }
 # account_ok <claude|codex|kiro> <dir>: silently tells whether the account is already fully set up
 account_ok() { local b=$BAD; QUIET=1; "chk_$1" "$2"; QUIET=0; local r=$((BAD - b)); BAD=$b; [ $r = 0 ]; }
@@ -330,7 +393,7 @@ upstream_newer() { command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ] || retu
   local lo re; lo="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; re="$(timeout 5 git -C "$ROOT" ls-remote origin HEAD 2>/dev/null | cut -f1)"; [ -n "$re" ] && [ "$re" != "$lo" ] || return 1
   git -C "$ROOT" cat-file -e "$re^{commit}" 2>/dev/null || return 0; ! git -C "$ROOT" merge-base --is-ancestor "$re" "$lo" 2>/dev/null; }
 if [ "$MODE" = check ]; then
-  ui_h "Check"; chk_scripts; SB=$BAD; FIX_CLAUDE=""; FIX_CODEX=""; FIX_KIRO=""
+  ui_h "Check"; chk_scripts; SB=$BAD; FIX_CLAUDE=""; FIX_CODEX=""; FIX_KIRO=""; FIX_AGY=""; FIX_CURSOR=""; FIX_QWEN=""
   while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_claude "$d"; [ $BAD -gt $b ] && FIX_CLAUDE="$FIX_CLAUDE
 $d"; done <<EOF2
 $CLAUDE_LIST
@@ -343,40 +406,65 @@ EOF2
 $d"; done <<EOF2
 $KIRO_LIST
 EOF2
+  while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_antigravity "$d"; [ $BAD -gt $b ] && FIX_AGY="$FIX_AGY
+$d"; done <<EOF2
+$AGY_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_cursor "$d"; [ $BAD -gt $b ] && FIX_CURSOR="$FIX_CURSOR
+$d"; done <<EOF2
+$CURSOR_LIST
+EOF2
+  while IFS= read -r d; do [ -n "$d" ] || continue; b=$BAD; chk_qwen "$d"; [ $BAD -gt $b ] && FIX_QWEN="$FIX_QWEN
+$d"; done <<EOF2
+$QWEN_LIST
+EOF2
   echo; upstream_newer && ui_warn "a newer version exists upstream: git pull, or re-run the one-line installer"
   if [ $BAD = 0 ]; then ui_info "everything looks fine"; exit 0; fi
   if [ $FIX = 1 ]; then ui_info "repairing $BAD problem(s)..."; MODE=install; YES=1
-    if [ $SB -gt 0 ]; then :; else CLAUDE_LIST="$FIX_CLAUDE"; CODEX_LIST="$FIX_CODEX"; KIRO_LIST="$FIX_KIRO"; fi
+    if [ $SB -gt 0 ]; then :; else CLAUDE_LIST="$FIX_CLAUDE"; CODEX_LIST="$FIX_CODEX"; KIRO_LIST="$FIX_KIRO"; AGY_LIST="$FIX_AGY"; CURSOR_LIST="$FIX_CURSOR"; QWEN_LIST="$FIX_QWEN"; fi
   else ui_warn "$BAD problem(s): run ./install.sh to repair, or ./install.sh --check --fix"; exit 1; fi; fi
 # ---------- uninstall ----------
 un_claude() { say "uninstalling Claude: $1"; ab_un_claude "$1"; remove_skills "$1"; }
 un_codex() { say "uninstalling Codex: $1"; ab_un_codex "$1"; remove_skills "$1"; }
 un_kiro() { say "uninstalling Kiro: $1"; ab_un_kiro "$1"; remove_skills "$1"; }
-if [ "$MODE" = uninstall ]; then each "$CLAUDE_LIST" un_claude; each "$CODEX_LIST" un_codex; each "$KIRO_LIST" un_kiro
+un_cursor() { say "uninstalling Cursor: $1"; ab_un_cursor "$1"; remove_skills "$1"; }
+un_qwen() { say "uninstalling Qwen: $1"; ab_un_qwen "$1"; remove_skills "$1"; }
+un_agy() { say "uninstalling Antigravity: $1"; ab_un_agy "$1"; remove_skills "$(agy_cfg "$1")"; }
+if [ "$MODE" = uninstall ]; then each "$CLAUDE_LIST" un_claude; each "$CODEX_LIST" un_codex; each "$KIRO_LIST" un_kiro; each "$AGY_LIST" un_agy; each "$CURSOR_LIST" un_cursor; each "$QWEN_LIST" un_qwen
   say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; exit 0; fi
 
 # ---------- install ----------
 in_claude() { [ "$PKG_AB" = 1 ] && ab_install_claude "$1"; install_skills "$1"; return 0; }
 in_codex() { [ "$PKG_AB" = 1 ] && ab_install_codex "$1"; install_skills "$1"; return 0; }
 in_kiro() { [ "$PKG_AB" = 1 ] && ab_install_kiro "$1"; install_skills "$1"; return 0; }
+in_agy() { [ "$PKG_AB" = 1 ] && ab_install_agy "$1"; install_skills "$(agy_cfg "$1")"; return 0; }
+in_cursor() { [ "$PKG_AB" = 1 ] && ab_install_cursor "$1"; install_skills "$1"; return 0; }
+in_qwen() { [ "$PKG_AB" = 1 ] && ab_install_qwen "$1"; install_skills "$1"; return 0; }
+step_cursor() { ui_run "${BOLD}Cursor${RST}  ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_cursor "$1"; }
+step_qwen() { ui_run "${BOLD}Qwen${RST}    ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_qwen "$1"; }
 step_claude() { ui_run "${BOLD}Claude${RST}  ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_claude "$1"; }
 step_codex() { ui_run "${BOLD}Codex${RST}   ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_codex "$1"; }
+step_agy() { ui_run "${BOLD}Agy${RST}     ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_agy "$1"; }
 step_kiro() { ui_run "${BOLD}Kiro${RST}    ${GRN}$(printf '%-9s' "$(get_name "$1")")${RST} ${CYN}$(tilde "$1")${RST}" in_kiro "$1"; }
 
 # remember which accounts were already fully set up (shown as "up to date" at the end)
 UPTODATE=""; if [ $DRY = 0 ] && [ "$PKG_AB" = 1 ] && command -v jq >/dev/null 2>&1; then
-  for d in $CLAUDE_LIST; do account_ok claude "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $CODEX_LIST; do account_ok codex "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $KIRO_LIST; do account_ok kiro "$d" && UPTODATE="$UPTODATE|$d"; done; fi
+  for d in $CLAUDE_LIST; do account_ok claude "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $CODEX_LIST; do account_ok codex "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $KIRO_LIST; do account_ok kiro "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $AGY_LIST; do account_ok antigravity "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $CURSOR_LIST; do account_ok cursor "$d" && UPTODATE="$UPTODATE|$d"; done; for d in $QWEN_LIST; do account_ok qwen "$d" && UPTODATE="$UPTODATE|$d"; done; fi
 ui_h "Installing"
 if [ "$PKG_AB" != 1 ]; then :; elif [ $DRY = 1 ]; then :; else ui_run "${BOLD}Scripts${RST}    ${CYN}$(tilde "$BR/bin")${RST}" do_scripts; fi
 if [ "$PKG_AB" = 1 ] && [ $OPT_PATH = 1 ] && [ $DRY = 0 ]; then ui_run "Commands on PATH  ${DIM}~/.local/bin${RST}" do_path; fi
-each "$CLAUDE_LIST" step_claude; each "$CODEX_LIST" step_codex; each "$KIRO_LIST" step_kiro
-NACC=$(printf '%s\n%s\n%s\n' "$CLAUDE_LIST" "$CODEX_LIST" "$KIRO_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
+each "$CLAUDE_LIST" step_claude; each "$CODEX_LIST" step_codex; each "$KIRO_LIST" step_kiro; each "$AGY_LIST" step_agy; each "$CURSOR_LIST" step_cursor; each "$QWEN_LIST" step_qwen
+# Cursor's official installer drops its own `agent` in ~/.local/bin and overwrites the bridge command: always use `cursor-agent`
+[ -n "$CURSOR_LIST" ] && ! cursor_agent_clash && ui_warn "the 'agent' on your PATH is Cursor's, not the bridge's. Workers call cursor-agent; reinstall the bridge command with ./install.sh (without --no-path) or ln -sfn ~/.claude-bridge/bin/agent ~/.local/bin/agent"
+[ -n "$CURSOR_LIST" ] && ui_info "Cursor: the bridge only ever calls 'cursor-agent', never 'agent'. Sign in with: cursor-agent login"
+[ -n "$QWEN_LIST" ] && ui_info "Qwen Code: sign in once (qwen, then /auth) or set an API key; workers run 'qwen \"<order>\"' headless"
+NACC=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$CLAUDE_LIST" "$CODEX_LIST" "$KIRO_LIST" "$AGY_LIST" "$CURSOR_LIST" "$QWEN_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
 [ "$NACC" -gt 0 ] || ui_warn "No accounts found. Use --claude-dir DIR / --codex-dir DIR."
 if [ $DRY = 1 ]; then say; say "dry-run finished: nothing was written."; exit 0; fi
 lines=("${GRN}${S_OK}${RST} $NACC account(s) configured")
 [ "${UI_FAILS:-0}" -gt 0 ] && lines=("${RED}${S_FAIL}${RST} ${UI_FAILS} step(s) failed - see $UI_LOG")
 [ -n "$SEL_SKILLS" ] && lines+=("${GRN}${S_OK}${RST} skills: $SEL_SKILLS")
-for d in $CLAUDE_LIST $CODEX_LIST $KIRO_LIST; do case "$UPTODATE" in *"|$d"*) st="already up to date";; *) st="updated";; esac
+for d in $CLAUDE_LIST $CODEX_LIST $KIRO_LIST $AGY_LIST $CURSOR_LIST $QWEN_LIST; do case "$UPTODATE" in *"|$d"*) st="already up to date";; *) st="updated";; esac
   lines+=("  ${DIM}$(get_name "$d")  $(tilde "$d")  ${RST}${GRN}$st${RST}"); done
 lines+=("" "${BOLD}Next steps${RST}" "  1. Restart open Claude/Codex sessions")
 [ "$PKG_AB" = 1 ] && ab_next_steps

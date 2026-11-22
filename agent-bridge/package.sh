@@ -78,6 +78,36 @@ in_kiro_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
   touch "$d/steering/AGENTS.md"; strip_block "$d/steering/AGENTS.md"; agents_block "$n" >> "$d/steering/AGENTS.md"
   return 0; }
 ab_install_kiro() { in_kiro_ab "$1"; }
+# Antigravity (agy): global rules live in <HOME>/.gemini/config/AGENTS.md (HOME derived from the account dir), skills in .../config/skills.
+agy_cfg() { printf '%s/.gemini/config' "$("$SRC/scripts/bridge-agy-home" "$1")"; }
+in_agy_ab() { local d="$1" n cfg; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0; cfg="$(agy_cfg "$d")"
+  mkdir -p "$cfg/skills/agent-bridge" "$BR/inbox/$n"; printf 'antigravity\n' > "$d/provider"
+  [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$cfg/skills/agent-bridge/SKILL.md"
+  touch "$cfg/AGENTS.md"; strip_block "$cfg/AGENTS.md"; agents_block "$n" >> "$cfg/AGENTS.md"
+  return 0; }
+ab_install_agy() { in_agy_ab "$1"; }
+ab_un_agy() { local d="$1" cfg; [ "$DRY" = 1 ] && return 0; cfg="$(agy_cfg "$d")"
+  rm -rf "$cfg/skills/agent-bridge"; strip_block "$cfg/AGENTS.md"; rm -f "$d/provider"; return 0; }
+# Cursor CLI (`cursor-agent`, workers only): the account dir is ~/.cursor (its own HOME is derived by bridge-account-home).
+# NEVER install or call a bare `agent` for Cursor: in this setup `agent` is the bridge command (Cursor's official installer overwrites it).
+in_cursor_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
+  mkdir -p "$d/skills/agent-bridge" "$BR/inbox/$n"; printf 'cursor\n' > "$d/provider"
+  [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"
+  return 0; }
+ab_install_cursor() { in_cursor_ab "$1"; }
+ab_un_cursor() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; rm -f "$d/provider"; return 0; }
+# Qwen Code (`qwen`, workers only): account dir ~/.qwen; global instructions in QWEN.md, skills in skills/.
+in_qwen_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
+  mkdir -p "$d/skills/agent-bridge" "$BR/inbox/$n"; printf 'qwen\n' > "$d/provider"
+  [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"
+  touch "$d/QWEN.md"; strip_block "$d/QWEN.md"; agents_block "$n" >> "$d/QWEN.md"
+  return 0; }
+ab_install_qwen() { in_qwen_ab "$1"; }
+ab_un_qwen() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; strip_block "$d/QWEN.md"; rm -f "$d/provider"; return 0; }
+# cursor_agent_clash: returns 1 when the `agent` found on PATH is Cursor's (not the bridge's), so callers can warn
+cursor_agent_clash() { local a r; a="$(command -v agent 2>/dev/null)" || return 0; [ -n "$a" ] || return 0; r="$(readlink -f "$a" 2>/dev/null || echo "$a")"
+  case "$r" in */.claude-bridge/bin/agent|*/agent-bridge/scripts/agent) return 0;; */cursor-agent/*|*/.cursor/*) return 1;; esac
+  "$a" --version 2>&1 | grep -qi 'cursor\|^20[0-9][0-9]\.' && return 1; return 0; }
 ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && unwrap_statusline "$d/settings.json" "$(get_name "$d")"
   [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# bridge-account-home <account-dir>: prints the HOME under which Cursor (`cursor-agent`) or Qwen Code (`qwen`) must run for that account.
+# Both keep their state in $HOME/.cursor / $HOME/.qwen (and Cursor's sign-in under $HOME/.config), so an account dir ".../.cursor" or
+# ".../.qwen" maps to its parent HOME; a dir that already contains ".cursor" or ".qwen" is itself a HOME; any other dir uses the current HOME.
+d="${1%/}"
+case "$d" in */.cursor|*/.qwen) printf '%s\n' "${d%/*}";;
+  *) if [ -d "$d/.cursor" ] || [ -d "$d/.qwen" ]; then printf '%s\n' "$d"; else printf '%s\n' "$HOME"; fi;; esac
