@@ -353,7 +353,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
       id="$(jq -r '.sessionID // empty' "$LIVE" 2>/dev/null | tail -1)"
       [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
       oc_cost="$(jq -rs '[.[]|select(.type=="step_finish")|.part.cost // 0]|add // 0' "$LIVE" 2>/dev/null)"
-      awk -v c="${oc_cost:-0}" -v f="$B/runs/$name.cost" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%.6f\n", t+c > f}'
+      LC_ALL=C awk -v c="${oc_cost:-0}" -v f="$B/runs/$name.cost" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%.6f\n", t+c > f}'
     fi
     RESET_AT=""
   elif [ "$kind" = copilot ]; then
@@ -366,7 +366,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     id="$(jq -r 'select(.type=="result")|.sessionId // empty' "$LIVE" 2>/dev/null | tail -1)"
     [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
     pr="$(jq -r 'select(.type=="result")|.usage.premiumRequests // empty' "$LIVE" 2>/dev/null | tail -1)"
-    [[ "$pr" =~ ^[0-9.]+$ ]] && awk -v c="$pr" -v f="$B/runs/$name.premium" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%s\n", t+c > f}'
+    [[ "$pr" =~ ^[0-9.]+$ ]] && LC_ALL=C awk -v c="$pr" -v f="$B/runs/$name.premium" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%s\n", t+c > f}'
     RESET_AT=""
   else
     : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""

@@ -347,12 +347,12 @@ check "provider resolver detects Cursor, Copilot and OpenCode marker dirs" "$("$
 check "account HOME of .cursor is its parent" "$("$S/bridge-account-home" "$T/home/cursorhome/.cursor")" "$T/home/cursorhome"
 check "Cursor model is checked against cursor-agent models" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 composer-2.5)" "cursor-1: model set to composer-2.5 (applies from its next order)"
 check "Cursor rejects an unknown model" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 nope 2>&1)" "unknown Cursor model or cursor-agent not available (see: cursor-agent models)"
-check "Cursor has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort cursor-1 high 2>&1 | head -c 33)" "effort is not configurable for cur"
-check "OpenCode has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort opencode-1 high 2>&1 | head -c 33)" "effort is not configurable for ope"
+check "Cursor has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort cursor-1 high 2>&1 | head -c 34)" "effort is not configurable for cur"
+check "OpenCode has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort opencode-1 high 2>&1 | head -c 34)" "effort is not configurable for ope"
 check "OpenCode accepts a free model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/test-free)" "opencode-1: model set to opencode/test-free (applies from its next order)"
 check "OpenCode accepts an openrouter :free model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-2 openrouter/x/y:free | head -c 24)" "opencode-2: model set to"
-check "OpenCode rejects a paid Zen model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/paid-model 2>&1 | head -c 40)" "opencode/paid-model is not a free model"
-check "OpenCode rejects a paid anthropic/* model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 anthropic/claude-haiku-5-5 2>&1 | head -c 49)" "anthropic/claude-haiku-5-5 is not a free model"
+check "OpenCode rejects a paid Zen model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/paid-model 2>&1 | grep -c 'opencode/paid-model is not a free model')" "1"
+check "OpenCode rejects a paid anthropic/* model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 anthropic/claude-haiku-5-5 2>&1 | grep -c 'anthropic/claude-haiku-5-5 is not a free model')" "1"
 check "BRIDGE_OPENCODE_PAID=1 allows a paid model" "$(BRIDGE_OPENCODE_PAID=1 BRIDGE_NAME=adm "$S/agent" model opencode-1 anthropic/claude-haiku-5-5 | head -c 22)" "opencode-1: model set "
 BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/test-free >/dev/null
 check "Copilot accepts effort low..xhigh" "$(BRIDGE_NAME=adm "$S/agent" effort copilot-1 high)" "copilot-1: effort set to high (applies from its next order)"
@@ -361,7 +361,7 @@ check "Cursor/OpenCode tier defaults to normal, Copilot is light" "$("$S/bridge-
 echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start cursor-1
 printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
 check "Cursor runner returns the final result" "$(last_msg)" "cursor listo"
-check "Cursor runs cursor-agent -p with force, trust and model" "$(grep -c -e '^-p .*--output-format stream-json --force --trust --model composer-2.5' "$FAKEMODE.curargs")" "1"
+check "Cursor runs cursor-agent -p with force, trust and model" "$(tr '\n' ' ' < "$FAKEMODE.curargs" | grep -c -e '^-p .*--output-format stream-json --force --trust --model composer-2.5')" "1"
 check "Cursor runs under its account HOME" "$(cat "$FAKEMODE.curhome")" "$T/home/cursorhome"
 check "Cursor prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.curargs")" "1"
 cur_sf="$(find "$T/b/sessions/cursor-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
@@ -383,7 +383,7 @@ check "Cursor safe mode drops --force" "$(grep -c -e '--force' "$FAKEMODE.curarg
 echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start copilot-1
 printf 'From: adm\nTo: copilot-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/cop-proj" > "$T/b/inbox/copilot-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
 check "Copilot runner returns the final answer" "$(last_msg)" "copilot listo"
-check "Copilot runs copilot -p with allow-all-tools, no-ask-user, json" "$(grep -c -e '^-p .*--no-ask-user --output-format json --allow-all-tools' "$FAKEMODE.copargs")" "1"
+check "Copilot runs copilot -p with allow-all-tools, no-ask-user, json" "$(tr '\n' ' ' < "$FAKEMODE.copargs" | grep -c -e '^-p .*--no-ask-user --output-format json --allow-all-tools')" "1"
 check "Copilot prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.copargs")" "1"
 cop_sf="$(find "$T/b/sessions/copilot-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
 check "Copilot saves its sessionId" "$(cat "$cop_sf" 2>/dev/null)" "sess-cop-test"

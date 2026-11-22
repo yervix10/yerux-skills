@@ -82,7 +82,7 @@ case "$1" in
           tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"
           kind="$("$D/bridge-provider" "$n" 2>/dev/null || echo other)"
           model_note=""; [ "$kind" != kiro ] || [ "$model" != auto ] || model_note="Kiro elige el modelo según la tarea (Models chosen by task)."
-          [ "$kind" = opencode ] && [ -n "$credits" ] && model_note="Coste acumulado: USD $(printf '%.4f' "$credits")"
+          [ "$kind" = opencode ] && [ -n "$credits" ] && model_note="Coste acumulado: USD $(LC_ALL=C printf '%.4f' "$credits")"
           if [ "$kind" = copilot ]; then tier=light; [ -n "$credits" ] && model_note="Premium requests usados: $credits (cuota mensual)"; fi
           items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg model_note "$model_note" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" --arg plan_used "$plan_used" --arg plan_total "$plan_total" --arg plan "$plan" \
             --arg ctx "$ctx" --arg h5 "$h5" --arg h5r "$h5r" --arg wk "$wk" --arg wkr "$wkr" --arg mo "$mo" --arg mor "$mor" --arg age "$age" \
