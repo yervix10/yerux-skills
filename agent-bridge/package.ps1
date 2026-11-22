@@ -72,16 +72,21 @@ function Ab-Install-Agy($d, $n) {
     $ag = Join-Path $cfg 'AGENTS.md'; Strip-Block $ag; Write-Text $ag ((Read-Text $ag) + "`n" + (Agents-Block $n)) }
 function Ab-Uninstall-Agy($d) {
   $cfg = Agy-Cfg $d; Remove-Item (Join-Path $cfg 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $cfg 'AGENTS.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
-# Cursor CLI (cursor-agent, workers only; never install or call a bare `agent`: here `agent` is the bridge command) and Qwen Code (qwen, workers only).
+# Cursor CLI (cursor-agent, workers only; never install or call a bare `agent`: here `agent` is the bridge command), OpenCode (opencode-N marker folders ~/.opencode-N sharing one install) and GitHub Copilot CLI (copilot, workers only).
 function Ab-Install-Cursor($d, $n) {
     Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'cursor'
     if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $d 'skills\agent-bridge\SKILL.md') -Force } }
 function Ab-Uninstall-Cursor($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
-function Ab-Install-Qwen($d, $n) {
-    Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'qwen'
+function Ab-Install-OpenCode($d, $n) {
+    Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'opencode'
     if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $d 'skills\agent-bridge\SKILL.md') -Force }
-    $q = Join-Path $d 'QWEN.md'; Strip-Block $q; Write-Text $q ((Read-Text $q) + "`n" + (Agents-Block $n)) }
-function Ab-Uninstall-Qwen($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $d 'QWEN.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
+    $q = Join-Path $d 'AGENTS.md'; Strip-Block $q; Write-Text $q ((Read-Text $q) + "`n" + (Agents-Block $n)) }
+function Ab-Uninstall-OpenCode($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $d 'AGENTS.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
+function Ab-Install-Copilot($d, $n) {
+    Ensure-Dir (Join-Path $d 'skills\agent-bridge'); Ensure-Dir (Join-Path $BR "inbox\$n"); Write-Text (Join-Path $d 'provider') 'copilot'
+    if ($optSkill) { Copy-Item (Join-Path $Src 'SKILL.md') (Join-Path $d 'skills\agent-bridge\SKILL.md') -Force }
+    $q = Join-Path $d 'copilot-instructions.md'; Strip-Block $q; Write-Text $q ((Read-Text $q) + "`n" + (Agents-Block $n)) }
+function Ab-Uninstall-Copilot($d) { Remove-Item (Join-Path $d 'skills\agent-bridge') -Recurse -Force -ErrorAction SilentlyContinue; Strip-Block (Join-Path $d 'copilot-instructions.md'); Remove-Item (Join-Path $d 'provider') -Force -ErrorAction SilentlyContinue }
 # Cursor-Agent-Clash: true when the `agent` found on PATH is Cursor's (not the bridge's)
 function Cursor-Agent-Clash { $c = Get-Command agent -ErrorAction SilentlyContinue; if (-not $c) { return $false }; $src = [string]$c.Source
   if ($src -match 'claude-bridge|agent-bridge') { return $false }; return ($src -match 'cursor') }

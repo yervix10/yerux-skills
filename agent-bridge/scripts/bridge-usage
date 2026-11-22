@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bridge-usage <name>: prints model, project, branch, ctx%, 5h%, week%, age, effort, resets, month%, month reset, session credits, model window, plan credits and plan.
-# ("-" = unknown; *_reset are epoch seconds; month = provider monthly usage). Codex: read from its latest session file. Claude context is retained from its latest live log; Kiro quota is cached for five minutes. Antigravity, Cursor and Qwen have no quota data (tier normal) and their context is estimated from token usage.
+# ("-" = unknown; *_reset are epoch seconds; month = provider monthly usage). Codex: read from its latest session file. Claude context is retained from its latest live log; Kiro quota is cached for five minutes. Antigravity and Cursor have no quota data (tier normal) and their context is estimated from token usage.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
 now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""; credits=""; ctxwin=""; plan_used=""; plan_total=""; plan=""
@@ -69,16 +69,14 @@ case "$kind" in
       used="$(jq -r 'select(.event=="step_update")|.step_update|select(.step_type=="agent_response" and .state=="DONE" and .usage!=null)|(.usage.input_tokens + .usage.cache_read_tokens + .usage.output_tokens)' "$live" 2>/dev/null | tail -1)"
       [[ "$used" =~ ^[0-9]+$ ]] && ctx=$((used * 100 / ctxwin))
     fi;;
-  cursor|qwen) # no quota or context meter in either CLI: model is what the admin set, context is estimated from the runner's live log
+  cursor) # no quota or context meter in the CLI: model is what the admin set, context is estimated from the runner's live log
     live="$B/logs/$name.live"; model="$(cat "$B/models/$name" 2>/dev/null)"; [ -n "$model" ] || model="default"
     sf="$(ls -t "$B/sessions/$name"/* 2>/dev/null | while IFS= read -r f; do case "$f" in *.cwd) continue;; esac; [ -f "$f" ] && { printf '%s\n' "$f"; break; }; done)"
     [ -n "$sf" ] && cwd="$(cat "$sf.cwd" 2>/dev/null)"
     if [ -s "$live" ]; then
       at="$(stat -c %Y "$live" 2>/dev/null || stat -f %m "$live" 2>/dev/null)"
-      if [ "$kind" = qwen ]; then ctxwin=256000; [[ "${BRIDGE_QWEN_WINDOW:-}" =~ ^[0-9]+$ ]] && ctxwin="$BRIDGE_QWEN_WINDOW"
-        used="$(jq -r 'select(.type=="assistant")|.message.usage|((.input_tokens // 0)+(.cache_read_input_tokens // 0))' "$live" 2>/dev/null | tail -1)"
-      else case "$model" in *1m*|*sol*|*fable*|*opus-5*) ctxwin=1000000;; *) ctxwin=200000;; esac; [[ "${BRIDGE_CURSOR_WINDOW:-}" =~ ^[0-9]+$ ]] && ctxwin="$BRIDGE_CURSOR_WINDOW"
-        used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$live" 2>/dev/null | tail -1)"; fi
+      case "$model" in *1m*|*sol*|*fable*|*opus-5*) ctxwin=1000000;; *) ctxwin=200000;; esac; [[ "${BRIDGE_CURSOR_WINDOW:-}" =~ ^[0-9]+$ ]] && ctxwin="$BRIDGE_CURSOR_WINDOW"
+      used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$live" 2>/dev/null | tail -1)"
       [[ "$used" =~ ^[0-9]+$ ]] && ctx=$((used * 100 / ctxwin))
     fi;;
   kiro)

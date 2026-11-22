@@ -34,7 +34,7 @@ for n in $(awk -F= '{print $2}' "$B/names.conf"); do
   [ -n "$ctx" ] && [ "$ctx" -ge "$(sed -n 's/^COMPACT_AT=//p' "$B/config" 2>/dev/null | head -1 | grep -E '^[1-9][0-9]*$' || echo 40)" ] && note="${note:+$note; }ctx ${ctx}% (compactará)"
   m="-"; e="-"
   if [ "$k" = claude ]; then case $t in light) m=sonnet; e=low;; normal) m=sonnet; e=medium;; heavy) m=sonnet; e=high;; esac   # Claude always runs sonnet (balanced for day-to-day work), never opus
-  elif [ "$k" = cursor ] || [ "$k" = qwen ]; then m="($k)"; e="-"   # no effort flag: only the tier is advised
+  elif [ "$k" = cursor ]; then m="($k)"; e="-"   # no effort flag: only the tier is advised
   elif [ "$k" = antigravity ]; then m="(Antigravity)"; case $t in light) e=low;; normal) e=medium;; heavy) e=high;; esac
   elif [ "$k" = kiro ]; then m="(Kiro)"; case $t in light) e=low;; normal) e=medium;; heavy) e=high;; esac
   else case $t in light) e=low;; normal) e=medium;; heavy) e=medium; [ $best -ge 80 ] && [ $ontrack = 1 ] && e=high;; esac; m="(su modelo)"; fi
@@ -46,4 +46,4 @@ for n in "${names[@]}"; do share="-"; [ "${TIER[$n]}" != skip ] && [ $total -gt 
   printf '%-9s %-7s %-6s %-6s %-12s %-7s %s\n' "$n" "${TIER[$n]}" "${REM[$n]}%" "$share" "${MODEL[$n]}" "${EFF[$n]}" "${NOTE[$n]}"; done
 echo; echo "tiers: heavy = tareas grandes/difíciles · normal = tareas medianas · light = solo tareas cortas · skip = no asignar hasta el reinicio. 'carga' = reparto sugerido del trabajo."
 if [ $apply = 1 ]; then echo; for n in "${names[@]}"; do [ "${TIER[$n]}" = skip ] && { echo "$n: sin cambios (skip)"; continue; }
-    if [ "${KIND[$n]}" = claude ]; then "$D/agent" model "$n" "${MODEL[$n]}" "${EFF[$n]}"; elif [ "${KIND[$n]}" = cursor ] || [ "${KIND[$n]}" = qwen ]; then echo "$n: sin cambios (${KIND[$n]} no tiene esfuerzo configurable)"; elif [ "${KIND[$n]}" = kiro ]; then "$D/agent" effort "$n" "${EFF[$n]}"; else "$D/agent" effort "$n" "${EFF[$n]}"; fi; done; fi
+    if [ "${KIND[$n]}" = claude ]; then "$D/agent" model "$n" "${MODEL[$n]}" "${EFF[$n]}"; elif [ "${KIND[$n]}" = cursor ]; then echo "$n: sin cambios (${KIND[$n]} no tiene esfuerzo configurable)"; elif [ "${KIND[$n]}" = kiro ]; then "$D/agent" effort "$n" "${EFF[$n]}"; else "$D/agent" effort "$n" "${EFF[$n]}"; fi; done; fi

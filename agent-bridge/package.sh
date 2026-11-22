@@ -96,14 +96,23 @@ in_cursor_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 
   return 0; }
 ab_install_cursor() { in_cursor_ab "$1"; }
 ab_un_cursor() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; rm -f "$d/provider"; return 0; }
-# Qwen Code (`qwen`, workers only): account dir ~/.qwen; global instructions in QWEN.md, skills in skills/.
-in_qwen_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
-  mkdir -p "$d/skills/agent-bridge" "$BR/inbox/$n"; printf 'qwen\n' > "$d/provider"
+# OpenCode (`opencode`, workers only): several workers share ONE install (~/.local/share/opencode/auth.json). Each worker is a marker
+# folder (~/.opencode-1, ~/.opencode-2, ...) holding `provider` (=opencode); its instructions live in AGENTS.md there.
+in_opencode_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
+  mkdir -p "$d/skills/agent-bridge" "$BR/inbox/$n"; printf 'opencode\n' > "$d/provider"
   [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"
-  touch "$d/QWEN.md"; strip_block "$d/QWEN.md"; agents_block "$n" >> "$d/QWEN.md"
+  touch "$d/AGENTS.md"; strip_block "$d/AGENTS.md"; agents_block "$n" >> "$d/AGENTS.md"
   return 0; }
-ab_install_qwen() { in_qwen_ab "$1"; }
-ab_un_qwen() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; strip_block "$d/QWEN.md"; rm -f "$d/provider"; return 0; }
+ab_install_opencode() { in_opencode_ab "$1"; }
+ab_un_opencode() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; strip_block "$d/AGENTS.md"; rm -f "$d/provider"; case "$(basename "$d")" in .opencode-*) rmdir "$d" 2>/dev/null || true;; esac; return 0; }
+# GitHub Copilot CLI (`copilot`, workers only): account dir ~/.copilot; instructions in copilot-instructions.md, skills in skills/.
+in_copilot_ab() { local d="$1" n; n="$(get_name "$d")"; [ "$DRY" = 1 ] && return 0
+  mkdir -p "$d/skills/agent-bridge" "$BR/inbox/$n"; printf 'copilot\n' > "$d/provider"
+  [ "$OPT_SKILL" = 1 ] && cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"
+  touch "$d/copilot-instructions.md"; strip_block "$d/copilot-instructions.md"; agents_block "$n" >> "$d/copilot-instructions.md"
+  return 0; }
+ab_install_copilot() { in_copilot_ab "$1"; }
+ab_un_copilot() { local d="$1"; [ "$DRY" = 1 ] && return 0; rm -rf "$d/skills/agent-bridge"; strip_block "$d/copilot-instructions.md"; rm -f "$d/provider"; return 0; }
 # cursor_agent_clash: returns 1 when the `agent` found on PATH is Cursor's (not the bridge's), so callers can warn
 cursor_agent_clash() { local a r; a="$(command -v agent 2>/dev/null)" || return 0; [ -n "$a" ] || return 0; r="$(readlink -f "$a" 2>/dev/null || echo "$a")"
   case "$r" in */.claude-bridge/bin/agent|*/agent-bridge/scripts/agent) return 0;; */cursor-agent/*|*/.cursor/*) return 1;; esac
