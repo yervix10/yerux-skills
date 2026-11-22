@@ -29,10 +29,10 @@ case "$kind" in
     fi;;
   claude)
     # candidates, newest wins: (a) JSON saved by bridge-statusline, (b) the status line cache some setups keep per session
-    # (~/.cache/lordos/claude/<session>.json, matched by its transcript path), (c) the worker's live stream-json log
+    # (BRIDGE_STATUS_CACHE=<dir> of <session>.json files, matched by its transcript path), (c) the worker's live stream-json log
     f="$B/logs/$name.live"; [ "$B/logs/$name.probe" -nt "$f" ] && f="$B/logs/$name.probe"   # probe = `agent refresh`
-    u="$B/usage/$name.json"; cache="${BRIDGE_STATUS_CACHE:-$HOME/.cache/lordos/claude}"
-    if [ -d "$cache" ]; then
+    u="$B/usage/$name.json"; cache="${BRIDGE_STATUS_CACHE:-}"
+    if [ -n "$cache" ] && [ -d "$cache" ]; then
       c="$(for x in "$cache"/*.json; do [ -f "$x" ] && jq -r --arg d "$dir/projects/" 'select((.transcript_path // "")|startswith($d))|input_filename' "$x" 2>/dev/null; done | xargs -r ls -t 2>/dev/null | head -1)"
       [ -n "$c" ] && { [ ! -s "$u" ] || [ "$c" -nt "$u" ]; } && u="$c"
     fi

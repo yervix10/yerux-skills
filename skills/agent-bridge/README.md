@@ -48,7 +48,7 @@ The admin has `/dashboard` (a single snapshot, `agent dashboard --once`) and `ag
 The installer wraps each Claude account's status line by default so the dashboard has its numbers (`--no-statusline` skips it).
 `agent capacity [--apply]` tells the admin how much work each worker can take from its 5h/weekly/monthly limits (tier skip/light/normal/heavy, suggested load share) and which model/effort to give it; `--apply` sets them.
 `agent refresh [name|all]` makes one tiny request per Claude account so the dashboard has fresh numbers (a few tokens each).
-On setups that keep a per-session status line cache (`~/.cache/lordos/claude/*.json`) the interactive agents are read from it automatically.
+On setups that keep a per-session status line cache (point `BRIDGE_STATUS_CACHE` at the directory holding its `<session>.json` files) the interactive agents are read from it automatically.
 `agent dashboard` shows every agent live, like the status line: `model | project | branch | ctx % | 5h % (↻ time to reset) | sem % (↻) | mes % (↻)` + its state (`mes` only when the provider has a monthly window).
 Runners compact their context before an order once it reaches `COMPACT_AT` % (default 40, `0` disables; set in `~/.claude-bridge/config` or `BRIDGE_COMPACT_AT`).
 Codex data comes from its latest session file; Kiro data comes from its session history; Claude data from the worker's live log, or from the real status line JSON if you install
