@@ -88,6 +88,7 @@ echo "api error"; echo api > "$T/mode"; send "x"; wait_reply 4
 check "reply starts with API ERROR" "$(last_msg | cut -c1-10)" "API ERROR:"; stop
 
 echo "alerts and activity"; echo slow > "$T/mode"; export BRIDGE_ALERT=3; start; send "long job"; sleep 5
+for _i in 1 2 3 4 5 6 7 8 9 10; do status | grep -q "now: Bash make build" && break; sleep 1; done
 check "status shows the order and the tool" "$(status)" "~now: Bash make build"; wait_reply 6
 wait_reply 6; n=$(for f in "$T/b/inbox/adm"/*.msg; do tail -n +6 "$f"; done | grep -c '^ALERT:'); check "ALERT messages sent (>=1)" "$([ "$n" -ge 1 ] && echo yes)" "yes"; stop; export BRIDGE_ALERT=0
 
@@ -440,7 +441,7 @@ check "installer writes Cursor skill and provider marker" "$([ -f "$HC/.cursor/s
 check "installer writes the Copilot block and marker" "$(grep -c BRIDGE-BEGIN "$HC/.copilot/copilot-instructions.md")/$(cat "$HC/.copilot/provider")" "1/copilot"
 check "installer writes both OpenCode markers and names them opencode-1/2" "$(cat "$HC/.opencode-1/provider" "$HC/.opencode-2/provider" | tr '\n' ' ')/$(grep -c 'opencode-[12]$' "$HC/.claude-bridge/names.conf")" "opencode opencode /2"
 check "installer check passes for Cursor, Copilot and OpenCode" "$(instc --check --cursor-dir "$HC/.cursor" --copilot-dir "$HC/.copilot" --opencode-dir "$HC/.opencode-1" --opencode-dir "$HC/.opencode-2" >/dev/null 2>&1; echo $?)" "0"
-check "--opencode-workers N creates N marker folders" "$(HOME="$T/ihome4" bash -c 'mkdir -p "$HOME"; cd "$0" && BRIDGE_DIR= ./install.sh --yes --no-path --opencode-workers 3 >/dev/null 2>&1; ls -d "$HOME"/.opencode-* | wc -l' "$ROOT")" "3"
+check "--opencode-workers N creates N marker folders" "$(HOME="$T/ihome4" bash -c 'mkdir -p "$HOME"; cd "$0" && BRIDGE_DIR= ./install.sh --yes --no-path --opencode-workers 3 >/dev/null 2>&1; ls -d "$HOME"/.opencode-* | wc -l | tr -d " "' "$ROOT")" "3"
 # a Cursor-installed `agent` shadowing the bridge command is reported
 mkdir -p "$HC/fakebin/cursor-agent"; printf '#!/bin/sh\necho 2026.11.22-test cursor\n' > "$HC/fakebin/cursor-agent/agent"; chmod +x "$HC/fakebin/cursor-agent/agent"; ln -sfn "$HC/fakebin/cursor-agent/agent" "$HC/fakebin/agent"
 check "installer warns when 'agent' on PATH is Cursor's" "$(PATH="$HC/fakebin:$OLDPATH" instc --check --cursor-dir "$HC/.cursor" 2>&1 | grep -c "is Cursor's")" "1"
