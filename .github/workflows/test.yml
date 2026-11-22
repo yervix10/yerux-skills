@@ -7,11 +7,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax of every shell script
         run: |
-          for f in install.sh get.sh lib/ui.sh agent-bridge/package.sh agent-bridge/scripts/*; do
-            [ "$f" = agent-bridge/scripts/bridge-feed ] && continue
+          for f in install.sh get.sh lib/ui.sh skills/agent-bridge/package.sh skills/agent-bridge/scripts/*; do
+            [ "$f" = skills/agent-bridge/scripts/bridge-feed ] && continue
             case "$f" in *.js) node --check "$f";; *) case "$(head -n 1 "$f")" in *python3*) python3 -m py_compile "$f";; *) bash -n "$f";; esac;; esac
           done
-          node --check agent-bridge/scripts/bridge-feed
+          node --check skills/agent-bridge/scripts/bridge-feed
       - name: Runner, worktree and installer tests
         run: tests/run.sh
   macos:

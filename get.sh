@@ -6,7 +6,7 @@
 #      AGENT_BRIDGE_HOME=<dir> (default ~/.agent-bridge) · AGENT_BRIDGE_TARBALL=<file> installs from a local archive
 set -eo pipefail
 REPO="${AGENT_BRIDGE_REPO:-yervix10/yerux-skills}"; REF="${AGENT_BRIDGE_REF:-main}"; APP="${AGENT_BRIDGE_HOME:-$HOME/.agent-bridge}"
-case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "Windows: use  powershell -c \"irm https://raw.githubusercontent.com/$REPO/$REF/agent-bridge/get.ps1 | iex\"" >&2; exit 1;; esac
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "Windows: use  powershell -c \"irm https://raw.githubusercontent.com/$REPO/$REF/get.ps1 | iex\"" >&2; exit 1;; esac
 for c in tar mktemp; do command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }; done
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 if [ -n "${AGENT_BRIDGE_TARBALL:-}" ]; then cp "$AGENT_BRIDGE_TARBALL" "$tmp/src.tgz"
@@ -19,8 +19,8 @@ else command -v curl >/dev/null || { echo "missing: curl" >&2; exit 1; }
   else echo "Downloading $REPO@$REF ..."; curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" -o "$tmp/src.tgz" || { echo "download failed (is the repo public and the ref correct?)" >&2; exit 1; }; fi; fi
 mkdir "$tmp/x"; tar -xzf "$tmp/src.tgz" -C "$tmp/x"
 src="$(ls -d "$tmp"/x/*/ 2>/dev/null | head -1)"; src="${src%/}"
-[ -n "$src" ] && [ -f "$src/install.sh" ] && [ -f "$src/agent-bridge/package.sh" ] || { echo "installer files not found in the archive" >&2; exit 1; }
-rm -rf "$APP/app"; mkdir -p "$APP"; cp -R "$src" "$APP/app"; chmod +x "$APP/app/agent-bridge/scripts/"* "$APP/app/install.sh"
+[ -n "$src" ] && [ -f "$src/install.sh" ] && [ -f "$src/skills/agent-bridge/package.sh" ] || { echo "installer files not found in the archive" >&2; exit 1; }
+rm -rf "$APP/app"; mkdir -p "$APP"; cp -R "$src" "$APP/app"; chmod +x "$APP/app/skills/agent-bridge/scripts/"* "$APP/app/install.sh"
 rm -rf "$tmp"; trap - EXIT
 export AGENT_BRIDGE_REF_USED="$REF"
 exec bash "$APP/app/install.sh" "$@"

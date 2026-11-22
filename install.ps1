@@ -1,5 +1,5 @@
 # yerux-skills installer (Windows): finds every Claude Code / Codex account and installs the featured package
-# (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge\package.ps1.
+# (agent-bridge) plus any of the other skills. Package-specific logic lives in skills\agent-bridge\package.ps1.
 # Interactive menu in a console; -Yes accepts everything detected.
 # Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-Safe] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
@@ -8,7 +8,7 @@ param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switc
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path; $Src = Join-Path $Root 'agent-bridge'; $RepoRoot = $Root
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path; $Src = Join-Path $Root 'skills\agent-bridge'; $RepoRoot = Join-Path $Root 'skills'
 $UserHome = $env:USERPROFILE
 $BR = Join-Path $UserHome '.claude-bridge'; $Bin = Join-Path $BR 'bin'; $Manifest = Join-Path $UserHome '.yerux-skills\installed.txt'
 # package: defined after the basic helpers below

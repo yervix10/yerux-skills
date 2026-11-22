@@ -2,7 +2,7 @@
 
 A collection of Agent Skills for Claude Code and Codex, with a one-line installer.
 **agent-bridge** is the featured package (sessions from different accounts that talk to each other); every other
-folder with a `SKILL.md` is an optional skill you can tick in the installer.
+folder under `skills/` with a `SKILL.md` is an optional skill you can tick in the installer.
 
 ## Install
 
@@ -20,4 +20,4 @@ Without a terminal it installs agent-bridge into every account found. Options af
 On Windows pass the same options with `$env:AGENT_BRIDGE_ARGS='-Yes -Skills all'`.
 Pin a version with `AGENT_BRIDGE_REF=<tag>`.
 
-From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows). Details: [agent-bridge/README.md](agent-bridge/README.md).
+From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows). Details: [skills/agent-bridge/README.md](skills/agent-bridge/README.md).

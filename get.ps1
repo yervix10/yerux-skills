@@ -15,7 +15,7 @@ try {
   else { Write-Host "  Downloading $repo@$ref ..." -ForegroundColor Cyan; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$repo/zip/$ref" -OutFile $zip }
   Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'x') -Force
-  $src = Get-ChildItem (Join-Path $tmp 'x') -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'install.ps1')) -and (Test-Path (Join-Path $_.FullName 'agent-bridge\package.ps1')) } | ForEach-Object { $_.FullName } | Select-Object -First 1
+  $src = Get-ChildItem (Join-Path $tmp 'x') -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'install.ps1')) -and (Test-Path (Join-Path $_.FullName 'skills\agent-bridge\package.ps1')) } | ForEach-Object { $_.FullName } | Select-Object -First 1
   if (-not $src) { throw 'installer files not found in the archive' }
   $dest = Join-Path $app 'app'
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }

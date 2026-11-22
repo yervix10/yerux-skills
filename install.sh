@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # yerux-skills installer (Linux, macOS, WSL): finds Claude Code / Codex / Kiro CLI / Google Antigravity (agy) / Cursor CLI / GitHub Copilot CLI / OpenCode accounts and installs the featured package
-# (agent-bridge) plus any of the other skills. Package-specific logic lives in agent-bridge/package.sh.
+# (agent-bridge) plus any of the other skills. Package-specific logic lives in skills/agent-bridge/package.sh.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
 # Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--no-statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]... [--kiro-dir DIR]... [--agy-dir DIR]... [--cursor-dir DIR]... [--copilot-dir DIR]... [--opencode-dir DIR]... [--opencode-workers N]
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
+ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/skills/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
 DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; COPILOT_LIST=""; OPENCODE_LIST=""; OC_WORKERS=0
-YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
+YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT/skills"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
 tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#$HOME}";; *) printf '%s' "$1";; esac; }
