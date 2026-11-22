@@ -66,6 +66,7 @@ case "$1" in
           ( cd "$HOME" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$n" CLAUDE_CONFIG_DIR="$dir" claude -p --no-session-persistence --output-format stream-json --verbose "Reply with exactly: ok" > "$R/logs/$n.probe.tmp" 2>/dev/null ) && mv "$R/logs/$n.probe.tmp" "$R/logs/$n.probe" && echo "$n: refreshed" || { rm -f "$R/logs/$n.probe.tmp"; echo "$n: failed (is claude logged in there?)"; };;
           antigravity) echo "$n: Antigravity data comes from its runner log, nothing to refresh";;
           cursor) echo "$n: Cursor data comes from its runner log, nothing to refresh";;
+          opencode|copilot) echo "$n: data comes from its runner log, nothing to refresh";;
           kiro) echo "$n: Kiro data comes from its sessions, nothing to refresh";;
           *) echo "$n: Codex data comes from its sessions, nothing to refresh";; esac; done;;
   dashboard) # live view (terminal) or --once: a single plain snapshot (what the admin's /dashboard prints)
@@ -81,6 +82,8 @@ case "$1" in
           tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"
           kind="$("$D/bridge-provider" "$n" 2>/dev/null || echo other)"
           model_note=""; [ "$kind" != kiro ] || [ "$model" != auto ] || model_note="Kiro elige el modelo según la tarea (Models chosen by task)."
+          [ "$kind" = opencode ] && [ -n "$credits" ] && model_note="Coste acumulado: USD $(printf '%.4f' "$credits")"
+          if [ "$kind" = copilot ]; then tier=light; [ -n "$credits" ] && model_note="Premium requests usados: $credits (cuota mensual)"; fi
           items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg model_note "$model_note" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" --arg plan_used "$plan_used" --arg plan_total "$plan_total" --arg plan "$plan" \
             --arg ctx "$ctx" --arg h5 "$h5" --arg h5r "$h5r" --arg wk "$wk" --arg wkr "$wkr" --arg mo "$mo" --arg mor "$mor" --arg age "$age" \
             '{name:$name,role:$role,kind:$kind,state:$state,detail:$line,model:$model,model_note:$model_note,effort:$eff,set_model:$want,set_effort:$weff,project:$proj,branch:$br,tier:$tier,credit_used:($credits|tonumber? // null),
@@ -130,12 +133,16 @@ case "$1" in
       kind="$("$D/bridge-provider" "$dir" 2>/dev/null || echo other)"
       setone() { local file="$1" val="$2" what="$3"
         if [ "$val" = default ]; then rm -f "$file"; echo "$n: $what back to its default (applies from its next order)"; return 0; fi
-        if [ "$what" = effort ] && { [ "$kind" = cursor ]; }; then echo "effort is not configurable for $kind workers (pick a model with the level built in, e.g. a *-high model)" >&2; return 1; fi
-        if [ "$what" = effort ]; then case "$kind" in claude|kiro|antigravity) levels="low medium high xhigh max";; *) levels="none minimal low medium high xhigh";; esac
+        if [ "$what" = effort ] && { [ "$kind" = cursor ] || [ "$kind" = opencode ]; }; then echo "effort is not configurable for $kind workers (pick a model with the level built in, e.g. a *-high model)" >&2; return 1; fi
+        if [ "$what" = effort ]; then case "$kind" in claude|kiro|antigravity) levels="low medium high xhigh max";; copilot) levels="low medium high xhigh";; *) levels="none minimal low medium high xhigh";; esac
           case " $levels " in *" $val "*) ;; *) echo "invalid effort for $kind: use one of $levels, or default" >&2; return 1;; esac
         else [[ "$val" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "invalid model name" >&2; return 1; }
           if [ "$kind" = kiro ] && { ! command -v kiro-cli >/dev/null 2>&1 || ! kiro-cli chat --list-models --format json 2>/dev/null | jq -e --arg m "$val" '.models[]|select(.model_id==$m)' >/dev/null; }; then echo "modelo Kiro desconocido o kiro-cli no disponible" >&2; return 1; fi
           if [ "$kind" = antigravity ] && { ! command -v agy >/dev/null 2>&1 || ! agy models 2>/dev/null | awk -F'\t' -v m="$val" '$1==m{f=1} END{exit !f}'; }; then echo "unknown Antigravity model or agy not available (see: agy models)" >&2; return 1; fi
+          if [ "$kind" = opencode ]; then
+            case "$val" in */*) ;; *) echo "OpenCode models are provider/model (see: opencode models)" >&2; return 1;; esac
+            case "$val" in *-free|*:free) ;; *) [ "${BRIDGE_OPENCODE_PAID:-0}" = 1 ] || { echo "$val is not a free model: OpenCode workers accept only *-free / *:free models (set BRIDGE_OPENCODE_PAID=1 to allow paid ones)" >&2; return 1; };; esac
+            if ! command -v opencode >/dev/null 2>&1 || ! opencode models 2>/dev/null | grep -qxF "$val"; then echo "unknown OpenCode model or opencode not available (see: opencode models)" >&2; return 1; fi; fi
           if [ "$kind" = cursor ] && { ! command -v cursor-agent >/dev/null 2>&1 || ! cursor-agent models 2>/dev/null | awk -v m="$val" '$1==m{f=1} END{exit !f}'; }; then echo "unknown Cursor model or cursor-agent not available (see: cursor-agent models)" >&2; return 1; fi; fi
         mkdir -p "$(dirname "$file")"; printf '%s' "$val" > "$file"; echo "$n: $what set to $val (applies from its next order)"; }
       if [ "$cmd" = model ]; then setone "$R/models/$n" "$v" model || exit 1; [ -n "$3" ] && { setone "$R/effort/$n" "$3" effort || exit 1; }

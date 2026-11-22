@@ -187,6 +187,26 @@ function parseCursor(line, ts = new Date().toISOString()) {
   else if (o.type === 'result' && o.result) out.push({ ts, role: 'result', text: trunc(o.result) });
   return out;
 }
+// OpenCode (`opencode run --format json`) and GitHub Copilot (`copilot --output-format json`) read from the runner's live log
+function parseOpenCode(line, ts = new Date().toISOString()) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const out = []; const p = o.part || {};
+  if (o.type === 'text' && p.text) out.push({ ts, role: 'assistant', text: trunc(p.text) });
+  else if (o.type === 'tool_use') {
+    const st = p.state || {}; const a = st.input || {}; const tool = trunc(p.tool || 'OpenCode tool');
+    out.push({ ts, role: 'tool', tool, text: trunc(printable(a.command || a.filePath || a.pattern || a)) });
+    if (st.status === 'completed' && st.output) out.push({ ts, role: 'tool_result', tool, text: trunc(printable(st.output)) });
+  } else if (o.type === 'error') out.push({ ts, role: 'result', text: trunc(printable(o.error?.data?.message || o.error?.message || o.error || 'error')) });
+  return out;
+}
+function parseCopilot(line, ts = new Date().toISOString()) {
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  const out = []; const d = o.data || {}; const t = String(o.type || '');
+  if (t === 'assistant.message' && (d.content || o.content)) out.push({ ts, role: 'assistant', text: trunc(printable(d.content || o.content)) });
+  else if (t.startsWith('tool.execution_start')) { const a = d.arguments || {}; out.push({ ts, role: 'tool', tool: trunc(d.toolName || 'Copilot tool'), text: trunc(printable(a.command || a.path || a.pattern || a)) }); }
+  else if (t.startsWith('tool.execution_complete')) out.push({ ts, role: 'tool_result', tool: trunc(d.toolName || 'Copilot tool'), text: trunc(printable(d.result?.content || d.result || '')) });
+  return out;
+}
 function tail(file, maxBytes = 1_000_000) {
   let fd;
   try {
@@ -243,6 +263,10 @@ function feed(name, opts = {}) {
     const live=path.join(root,'logs',`${name}.live`); let ts=new Date().toISOString(); try{ts=fs.statSync(live).mtime.toISOString();}catch{}
     for(const l of tail(live))events.push(...parseAgy(l,ts));
   }
+  else if(kind==='opencode'||kind==='copilot') { // the runner's live log (JSON events of the last order)
+    const live=path.join(root,'logs',`${name}.live`); let ts=new Date().toISOString(); try{ts=fs.statSync(live).mtime.toISOString();}catch{}
+    for(const l of tail(live))events.push(...(kind==='opencode'?parseOpenCode:parseCopilot)(l,ts));
+  }
   else if(kind==='cursor') { // the runner's live log (stream-json of the last order)
     const live=path.join(root,'logs',`${name}.live`); let ts=new Date().toISOString(); try{ts=fs.statSync(live).mtime.toISOString();}catch{}
     for(const l of tail(live))events.push(...parseCursor(l,ts));
@@ -267,4 +291,4 @@ function feed(name, opts = {}) {
   return {name,state:{status:state.status||'unknown',since:Number(state.since)||null,activity:trunc(state.activity)},events:selectEvents(events,{...opts,limit})};
 }
 if(require.main===module){const [name,...args]=process.argv.slice(2);const li=args.indexOf('--limit');const limit=li>=0?Number(args[li+1]):undefined;const si=args.indexOf('--since');try{const result=feed(name,{limit,since:si>=0?args[si+1]:undefined});console.log(args.includes('--json')?JSON.stringify(result):result.events.map(e=>`${e.ts} ${e.role}: ${e.text}`).join('\n'));}catch(e){console.error(e.message);process.exit(1);}}
-module.exports={feed,parseClaude,parseAdminClaude,parseCodex,parseKiro,parseAgy,parseCursor,redact,tail,tailUseful,selectEvents,cleanOrder,printable};
+module.exports={feed,parseClaude,parseAdminClaude,parseCodex,parseKiro,parseAgy,parseCursor,parseOpenCode,parseCopilot,redact,tail,tailUseful,selectEvents,cleanOrder,printable};

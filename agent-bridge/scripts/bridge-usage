@@ -79,6 +79,17 @@ case "$kind" in
       used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$live" 2>/dev/null | tail -1)"
       [[ "$used" =~ ^[0-9]+$ ]] && ctx=$((used * 100 / ctxwin))
     fi;;
+  opencode|copilot) # no quota meter: model is what the admin set; credits = accumulated cost (OpenCode, USD from step_finish) or premium requests (Copilot)
+    live="$B/logs/$name.live"; model="$(cat "$B/models/$name" 2>/dev/null)"; [ -n "$model" ] || model="default"
+    sf="$(ls -t "$B/sessions/$name"/* 2>/dev/null | while IFS= read -r f; do case "$f" in *.cwd) continue;; esac; [ -f "$f" ] && { printf '%s\n' "$f"; break; }; done)"
+    [ -n "$sf" ] && cwd="$(cat "$sf.cwd" 2>/dev/null)"
+    if [ "$kind" = opencode ]; then credits="$(cat "$B/runs/$name.cost" 2>/dev/null)"; ctxwin=128000; [[ "${BRIDGE_OPENCODE_WINDOW:-}" =~ ^[0-9]+$ ]] && ctxwin="$BRIDGE_OPENCODE_WINDOW"
+    else credits="$(cat "$B/runs/$name.premium" 2>/dev/null)"; ctxwin=128000; [[ "${BRIDGE_COPILOT_WINDOW:-}" =~ ^[0-9]+$ ]] && ctxwin="$BRIDGE_COPILOT_WINDOW"; fi
+    if [ -s "$live" ]; then
+      at="$(stat -c %Y "$live" 2>/dev/null || stat -f %m "$live" 2>/dev/null)"
+      if [ "$kind" = opencode ]; then used="$(jq -r 'select(.type=="step_finish")|.part.tokens.total // empty' "$live" 2>/dev/null | tail -1)"
+        [[ "$used" =~ ^[0-9]+$ ]] && ctx=$((used * 100 / ctxwin)); fi
+    fi;;
   kiro)
     sess_file=""; sess="$(find "$B/sessions/$name" -maxdepth 1 -type f ! -name '*.cwd' -print 2>/dev/null | head -1)"; sess="$(cat "$sess" 2>/dev/null)"
     if [ -n "$sess" ]; then sess_file="$(find "$dir/sessions" -path "*/$sess/session.json" -type f 2>/dev/null | head -1)"; fi
