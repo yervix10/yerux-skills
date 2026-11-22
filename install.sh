@@ -370,6 +370,7 @@ act() { if [ $DRY = 1 ]; then say "  [dry-run] $*"; else eval "$@"; fi; }
 each() { local list="$1"; shift; while IFS= read -r d; do [ -n "$d" ] && "$@" "$d"; done <<EOF2
 $list
 EOF2
+  return 0
 }
 
 # extra skills installed by this installer are recorded so --uninstall can remove exactly those
