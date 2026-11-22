@@ -411,7 +411,7 @@ check "OpenCode resumes with -s <id>" "$(wc -l < "$FAKEMODE.ocresumed" 2>/dev/nu
 check "OpenCode context is estimated from step_finish tokens" "$("$S/bridge-usage" opencode-1 | cut -f4)" "25"
 check "OpenCode accumulates cost across orders" "$("$S/bridge-usage" opencode-1 | cut -f13)" "0.005000"
 OJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
-check "OpenCode dashboard row shows model and cost" "$(printf '%s' "$OJSON" | jq -r '.agents[]|select(.name=="opencode-1")|[.kind,.model,.credit_used]|@tsv')" "opencode	opencode/test-free	0.005"
+check "OpenCode dashboard row shows model and cost" "$(printf '%s' "$OJSON" | jq -r '.agents[]|select(.name=="opencode-1")|[.kind,.model,(.credit_used+0)]|@tsv')" "opencode	opencode/test-free	0.005"
 check "OpenCode feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" opencode-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "bash"
 echo limit > "$T/mode"; printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nthird\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
 check "OpenCode free-models-per-day is LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
