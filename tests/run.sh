@@ -4,10 +4,10 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; OLDPATH="$PATH"
 T="$(mktemp -d)"; trap 'kill $RP 2>/dev/null; rm -rf "$T"' EXIT; RP=""
-S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/agy-1" "$T/b/inbox/cursor-1" "$T/b/inbox/qwen-1" "$T/home/cursorhome/.cursor" "$T/home/qwenhome/.qwen" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/home/agyhome/.gemini/antigravity-cli" "$T/proj"
+S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/agy-1" "$T/b/inbox/cursor-1" "$T/b/inbox/copilot-1" "$T/b/inbox/opencode-1" "$T/b/inbox/opencode-2" "$T/home/cursorhome/.cursor" "$T/home/copilothome/.copilot" "$T/home/.opencode-1" "$T/home/.opencode-2" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/home/agyhome/.gemini/antigravity-cli" "$T/proj"
 cp -a "$ROOT/agent-bridge/scripts/." "$S/"
 export BRIDGE_DIR="$T/b" FAKEMODE="$T/mode" KIRO_TEST_HOME="$T/home/.kiro-fake" CLAUDE_TEST_ARGS="$T/claude-test-args" PATH="$T/bin:$PATH" BRIDGE_ALERT=0 BRIDGE_STALL=0 BRIDGE_WORKTREE=0 BRIDGE_LIMIT_PAUSE=3 BRIDGE_COMPACT_AT=40 BRIDGE_NOTIFY=0
-printf "%s\n%s\n%s\n%s\n" "$T/home/.claude-fake=w1" "$T/home/.codex-fake=w2" "$T/home/.kiro-fake=kiro-1" "$T/home/agyhome/.gemini/antigravity-cli=agy-1" > "$T/b/names.conf"; printf "%s\n%s\n" "$T/home/cursorhome/.cursor=cursor-1" "$T/home/qwenhome/.qwen=qwen-1" >> "$T/b/names.conf"; echo adm > "$T/b/admin"
+printf "%s\n%s\n%s\n%s\n" "$T/home/.claude-fake=w1" "$T/home/.codex-fake=w2" "$T/home/.kiro-fake=kiro-1" "$T/home/agyhome/.gemini/antigravity-cli=agy-1" > "$T/b/names.conf"; printf "%s\n%s\n" "$T/home/cursorhome/.cursor=cursor-1" "$T/home/copilothome/.copilot=copilot-1" >> "$T/b/names.conf"; printf "%s\n%s\n" "$T/home/.opencode-1=opencode-1" "$T/home/.opencode-2=opencode-2" >> "$T/b/names.conf"; echo adm > "$T/b/admin"
 cat > "$T/bin/claude" <<'EOF'
 #!/bin/bash
 echo "$PWD" > "$FAKEMODE.cwd"
@@ -298,8 +298,8 @@ check "Antigravity pause is recorded" "$(sed -n 's/^last_kind=//p' "$T/b/runs/ag
 echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; start agy-1; wait_reply $((base_count + 4)); stop
 check "Antigravity authentication failure is an API error" "$(last_msg | head -c 10)" "API ERROR:"
 
-echo "Cursor (cursor-agent) and Qwen Code (qwen) providers with fakes"; export PATH="$T/bin:$OLDPATH"
-mkdir -p "$T/cur-proj" "$T/qwen-proj"
+echo "Cursor (cursor-agent), GitHub Copilot and OpenCode providers with fakes"; export PATH="$T/bin:$OLDPATH"
+mkdir -p "$T/cur-proj" "$T/cop-proj" "$T/oc-proj" "$T/oc-proj2"
 cat > "$T/bin/cursor-agent" <<'EOF'
 #!/bin/bash
 if [ "$1" = models ]; then printf 'Available models\n\nauto - Auto (current, default)\ncomposer-2.5 - Composer 2.5\n'; exit 0; fi
@@ -314,27 +314,50 @@ echo '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"shell
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"cursor listo"}]},"session_id":"sess-cur-test"}'
 echo '{"type":"result","subtype":"success","is_error":false,"result":"cursor listo","session_id":"sess-cur-test","usage":{"inputTokens":40000,"outputTokens":10,"cacheReadTokens":10000,"cacheWriteTokens":0}}'
 EOF
-cat > "$T/bin/qwen" <<'EOF'
+cat > "$T/bin/copilot" <<'EOF'
 #!/bin/bash
-echo "$*" > "$FAKEMODE.qwenargs"; echo "$HOME" > "$FAKEMODE.qwenhome"
-[[ "$*" == *"--resume sess-qwen-test"* ]] && echo resumed >> "$FAKEMODE.qwenresumed"
+echo "$*" > "$FAKEMODE.copargs"; echo "$HOME" > "$FAKEMODE.copcwd"; pwd > "$FAKEMODE.copcwd"
+[[ "$*" == *"--resume sess-cop-test"* ]] && echo resumed >> "$FAKEMODE.copresumed"
 case "$(cat "$FAKEMODE")" in
-  limit) echo '{"type":"result","subtype":"error_during_execution","session_id":"sess-qwen-test","is_error":true,"error":{"message":"429 Too Many Requests: quota exceeded"}}'; exit 1;;
-  auth)  echo '{"type":"result","subtype":"error_during_execution","session_id":"s","is_error":true,"error":{"message":"No auth type is selected. Please configure an auth type"}}'; exit 0;;
+  limit) echo "Error: 429 rate limit exceeded for premium requests" >&2; exit 1;;
+  auth)  echo "Access denied by policy settings" >&2; exit 1;;
 esac
-echo '{"type":"system","subtype":"init","session_id":"sess-qwen-test","model":"qwen3-coder"}'
-echo '{"type":"assistant","session_id":"sess-qwen-test","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"run_shell_command","input":{"command":"ls /tmp"}}],"usage":{"input_tokens":64000,"output_tokens":5,"cache_read_input_tokens":0}}}'
-echo '{"type":"assistant","session_id":"sess-qwen-test","message":{"role":"assistant","content":[{"type":"text","text":"qwen listo"}],"usage":{"input_tokens":64000,"output_tokens":5,"cache_read_input_tokens":0}}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"qwen listo","session_id":"sess-qwen-test","usage":{"input_tokens":64000,"output_tokens":5}}'
+echo '{"type":"session.start","data":{"sessionId":"sess-cop-test"}}'
+echo '{"type":"tool.execution_start","data":{"toolName":"bash","arguments":{"command":"ls /tmp"}}}'
+echo '{"type":"assistant.message","data":{"content":"copilot listo"}}'
+echo '{"type":"result","sessionId":"sess-cop-test","exitCode":0,"usage":{"premiumRequests":1}}'
 EOF
-chmod +x "$T/bin/cursor-agent" "$T/bin/qwen"
-check "provider resolver detects Cursor and Qwen account dirs" "$("$S/bridge-provider" cursor-1)/$("$S/bridge-provider" qwen-1)" "cursor/qwen"
-check "account HOME of .cursor/.qwen is its parent" "$("$S/bridge-account-home" "$T/home/cursorhome/.cursor")/$("$S/bridge-account-home" "$T/home/qwenhome/.qwen/")" "$T/home/cursorhome/$T/home/qwenhome"
+cat > "$T/bin/opencode" <<'EOF'
+#!/bin/bash
+if [ "$1" = models ]; then printf 'opencode/test-free\nopencode/paid-model\nanthropic/claude-haiku-5-5\nopenrouter/x/y:free\n'; exit 0; fi
+echo "$*" > "$FAKEMODE.ocargs"; pwd > "$FAKEMODE.occwd"
+[[ "$*" == *" -s ses_test"* ]] && echo resumed >> "$FAKEMODE.ocresumed"
+case "$(cat "$FAKEMODE")" in
+  limit) echo '{"type":"error","sessionID":"ses_test","error":{"name":"APIError","data":{"message":"Rate limit exceeded: free-models-per-day"}}}'; exit 0;;
+  tpm)   echo '{"type":"error","sessionID":"ses_test","error":{"data":{"message":"Request too large for model: tokens per minute (TPM): Limit 8000"}}}'; exit 0;;
+  scope) echo '{"type":"error","sessionID":"ses_test","error":{"data":{"message":"This API key is not scoped to a workspace"}}}'; exit 0;;
+esac
+echo '{"type":"step_start","sessionID":"ses_test","part":{"type":"step-start"}}'
+echo '{"type":"tool_use","sessionID":"ses_test","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls /tmp"},"output":"x"}}}'
+echo '{"type":"text","sessionID":"ses_test","part":{"type":"text","text":"opencode listo"}}'
+echo '{"type":"step_finish","sessionID":"ses_test","part":{"type":"step-finish","tokens":{"total":32000,"input":31000,"output":10},"cost":0.0025}}'
+EOF
+chmod +x "$T/bin/cursor-agent" "$T/bin/copilot" "$T/bin/opencode"
+check "provider resolver detects Cursor, Copilot and OpenCode marker dirs" "$("$S/bridge-provider" cursor-1)/$("$S/bridge-provider" copilot-1)/$("$S/bridge-provider" opencode-2)" "cursor/copilot/opencode"
+check "account HOME of .cursor is its parent" "$("$S/bridge-account-home" "$T/home/cursorhome/.cursor")" "$T/home/cursorhome"
 check "Cursor model is checked against cursor-agent models" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 composer-2.5)" "cursor-1: model set to composer-2.5 (applies from its next order)"
 check "Cursor rejects an unknown model" "$(BRIDGE_NAME=adm "$S/agent" model cursor-1 nope 2>&1)" "unknown Cursor model or cursor-agent not available (see: cursor-agent models)"
 check "Cursor has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort cursor-1 high 2>&1 | head -c 33)" "effort is not configurable for cur"
-check "Qwen has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort qwen-1 high 2>&1 | head -c 33)" "effort is not configurable for qwe"
-check "Cursor and Qwen tier defaults to normal without quota data" "$("$S/bridge-capacity" --tier cursor-1)/$("$S/bridge-capacity" --tier qwen-1)" "normal/normal"
+check "OpenCode has no configurable effort" "$(BRIDGE_NAME=adm "$S/agent" effort opencode-1 high 2>&1 | head -c 33)" "effort is not configurable for ope"
+check "OpenCode accepts a free model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/test-free)" "opencode-1: model set to opencode/test-free (applies from its next order)"
+check "OpenCode accepts an openrouter :free model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-2 openrouter/x/y:free | head -c 24)" "opencode-2: model set to"
+check "OpenCode rejects a paid Zen model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/paid-model 2>&1 | head -c 40)" "opencode/paid-model is not a free model"
+check "OpenCode rejects a paid anthropic/* model" "$(BRIDGE_NAME=adm "$S/agent" model opencode-1 anthropic/claude-haiku-5-5 2>&1 | head -c 49)" "anthropic/claude-haiku-5-5 is not a free model"
+check "BRIDGE_OPENCODE_PAID=1 allows a paid model" "$(BRIDGE_OPENCODE_PAID=1 BRIDGE_NAME=adm "$S/agent" model opencode-1 anthropic/claude-haiku-5-5 | head -c 22)" "opencode-1: model set "
+BRIDGE_NAME=adm "$S/agent" model opencode-1 opencode/test-free >/dev/null
+check "Copilot accepts effort low..xhigh" "$(BRIDGE_NAME=adm "$S/agent" effort copilot-1 high)" "copilot-1: effort set to high (applies from its next order)"
+BRIDGE_NAME=adm "$S/agent" effort copilot-1 default >/dev/null
+check "Cursor/OpenCode tier defaults to normal, Copilot is light" "$("$S/bridge-capacity" --tier cursor-1)/$("$S/bridge-capacity" --tier opencode-1)/$("$S/bridge-capacity" --tier copilot-1)" "normal/normal/light"
 echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start cursor-1
 printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
 check "Cursor runner returns the final result" "$(last_msg)" "cursor listo"
@@ -357,36 +380,70 @@ echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: cursor-1\nDate: x\nCwd:
 check "Cursor login failure is an API error" "$(last_msg | head -c 10)" "API ERROR:"
 rm -f "$FAKEMODE.curargs"; echo ok > "$T/mode"; BRIDGE_BYPASS=safe start cursor-1; printf 'From: adm\nTo: cursor-1\nDate: x\nCwd: %s\n\nfifth\n' "$T/cur-proj" > "$T/b/inbox/cursor-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 5)); stop
 check "Cursor safe mode drops --force" "$(grep -c -e '--force' "$FAKEMODE.curargs")" "0"
-echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start qwen-1
-printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
-check "Qwen runner returns the final result" "$(last_msg)" "qwen listo"
-check "Qwen runs qwen <prompt> in yolo, stream-json" "$(grep -c -e '--output-format stream-json --approval-mode yolo' "$FAKEMODE.qwenargs")" "1"
-check "Qwen runs under its account HOME" "$(cat "$FAKEMODE.qwenhome")" "$T/home/qwenhome"
-check "Qwen prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.qwenargs")" "1"
-qwen_sf="$(find "$T/b/sessions/qwen-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
-check "Qwen saves its session id" "$(cat "$qwen_sf" 2>/dev/null)" "sess-qwen-test"
-printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nsecond\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
-check "Qwen resumes with --resume <id>" "$(wc -l < "$FAKEMODE.qwenresumed" 2>/dev/null | tr -d ' ')" "1"
-check "Qwen context is estimated from assistant usage" "$("$S/bridge-usage" qwen-1 | cut -f4)" "25"
-QJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
-check "Qwen dashboard row has kind and no quota windows" "$(printf '%s' "$QJSON" | jq -r '.agents[]|select(.name=="qwen-1")|[.kind,.five_hour.used,.weekly.used,.monthly.used,.tier]|@tsv')" "qwen				normal"
-check "Qwen feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" qwen-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "run_shell_command"
-echo limit > "$T/mode"; printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nthird\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
-check "Qwen 429 pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
-echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: qwen-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/qwen-proj" > "$T/b/inbox/qwen-1/$(date +%s%N)-de-adm.msg"; start qwen-1; wait_reply $((base_count + 4)); stop
-check "Qwen unauthenticated result (rc 0, is_error) is an error" "$(last_msg | head -c 6)" "ERROR "
-echo "installer: Cursor and Qwen accounts"; export PATH="$OLDPATH"
-HC="$T/ihome3"; mkdir -p "$HC/.cursor" "$HC/.qwen"
+echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start copilot-1
+printf 'From: adm\nTo: copilot-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/cop-proj" > "$T/b/inbox/copilot-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
+check "Copilot runner returns the final answer" "$(last_msg)" "copilot listo"
+check "Copilot runs copilot -p with allow-all-tools, no-ask-user, json" "$(grep -c -e '^-p .*--no-ask-user --output-format json --allow-all-tools' "$FAKEMODE.copargs")" "1"
+check "Copilot prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.copargs")" "1"
+cop_sf="$(find "$T/b/sessions/copilot-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "Copilot saves its sessionId" "$(cat "$cop_sf" 2>/dev/null)" "sess-cop-test"
+printf 'From: adm\nTo: copilot-1\nDate: x\nCwd: %s\n\nsecond\n' "$T/cop-proj" > "$T/b/inbox/copilot-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
+check "Copilot resumes with --resume <id>" "$(wc -l < "$FAKEMODE.copresumed" 2>/dev/null | tr -d ' ')" "1"
+check "Copilot counts premium requests" "$("$S/bridge-usage" copilot-1 | cut -f13)" "2"
+CPJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "Copilot dashboard row: kind, light tier, premium counter" "$(printf '%s' "$CPJSON" | jq -r '.agents[]|select(.name=="copilot-1")|[.kind,.tier,.credit_used]|@tsv')" "copilot	light	2"
+check "Copilot feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" copilot-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "bash"
+echo limit > "$T/mode"; printf 'From: adm\nTo: copilot-1\nDate: x\nCwd: %s\n\nthird\n' "$T/cop-proj" > "$T/b/inbox/copilot-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
+check "Copilot rate limit pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+echo auth > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: copilot-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/cop-proj" > "$T/b/inbox/copilot-1/$(date +%s%N)-de-adm.msg"; start copilot-1; wait_reply $((base_count + 4)); stop
+check "Copilot 'Access denied by policy' is an API error, not a limit" "$(last_msg | head -c 10)" "API ERROR:"
+# --- OpenCode: two workers share one install, each with its own model/session
+echo ok > "$T/mode"; base_count="$(ls "$T/b/inbox/adm" 2>/dev/null | wc -l | tr -d ' ')"; start opencode-1
+printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nresponde solo: ok\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 1))
+check "OpenCode runner returns the final text" "$(last_msg)" "opencode listo"
+check "OpenCode runs opencode run -m <free model> --format json --dir" "$(grep -c -e "^run -m opencode/test-free --format json --dir $T/oc-proj " "$FAKEMODE.ocargs")" "1"
+check "OpenCode prompt forbids sending its own bridge reply" "$(grep -c "Do not use the 'agent' or 'admin' command" "$FAKEMODE.ocargs")" "1"
+oc_sf="$(find "$T/b/sessions/opencode-1" -maxdepth 1 -type f ! -name '*.cwd' | head -1)"
+check "OpenCode saves its sessionID" "$(cat "$oc_sf" 2>/dev/null)" "ses_test"
+printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nsecond\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 2))
+check "OpenCode resumes with -s <id>" "$(wc -l < "$FAKEMODE.ocresumed" 2>/dev/null | tr -d ' ')" "1"
+check "OpenCode context is estimated from step_finish tokens" "$("$S/bridge-usage" opencode-1 | cut -f4)" "25"
+check "OpenCode accumulates cost across orders" "$("$S/bridge-usage" opencode-1 | cut -f13)" "0.005000"
+OJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
+check "OpenCode dashboard row shows model and cost" "$(printf '%s' "$OJSON" | jq -r '.agents[]|select(.name=="opencode-1")|[.kind,.model,.credit_used]|@tsv')" "opencode	opencode/test-free	0.005"
+check "OpenCode feed shows its tool call" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" opencode-1 --json 2>/dev/null | jq -r '[.events[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "bash"
+echo limit > "$T/mode"; printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nthird\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
+check "OpenCode free-models-per-day is LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+echo tpm > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nfourth\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; start opencode-1; wait_reply $((base_count + 4)); stop
+check "OpenCode 'tokens per minute (TPM)' is LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
+echo scope > "$T/mode"; sleep 3.5; printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nfifth\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; start opencode-1; wait_reply $((base_count + 5)); stop
+check "'not scoped to a workspace' is API with the anthropic-workspace-id hint" "$(last_msg | head -c 10)/$(last_msg | grep -c 'anthropic-workspace-id')" "API ERROR:/1"
+# a paid model set behind the runner's back is refused at run time
+echo ok > "$T/mode"; printf '%s' "anthropic/claude-haiku-5-5" > "$T/b/models/opencode-2"; rm -f "$FAKEMODE.ocargs"; start opencode-2
+printf 'From: adm\nTo: opencode-2\nDate: x\nCwd: %s\n\nsixth\n' "$T/oc-proj2" > "$T/b/inbox/opencode-2/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 6)); stop
+check "OpenCode runner refuses a paid model without BRIDGE_OPENCODE_PAID" "$(last_msg | head -c 9)/$([ -e "$FAKEMODE.ocargs" ] && echo ran || echo notrun)" "ERROR (co/notrun"
+rm -f "$T/b/models/opencode-2"
+# process saturation (EAGAIN) is retried
+printf '#!/bin/bash\nn="$FAKEMODE.eagain"; c=$(cat "$n" 2>/dev/null || echo 0); echo $((c+1)) > "$n"\nif [ "$c" -lt 2 ]; then echo "Failed to start thread: EAGAIN" >&2; exit 134; fi\necho "{\\"type\\":\\"text\\",\\"sessionID\\":\\"ses_e\\",\\"part\\":{\\"text\\":\\"tras reintento\\"}}"\n' > "$T/bin/opencode.eagain"; chmod +x "$T/bin/opencode.eagain"
+cp "$T/bin/opencode" "$T/bin/opencode.real"; cp "$T/bin/opencode.eagain" "$T/bin/opencode"; rm -f "$FAKEMODE.eagain"
+BRIDGE_RETRY_WAIT=1 start opencode-1
+printf 'From: adm\nTo: opencode-1\nDate: x\nCwd: %s\n\nseventh\n' "$T/oc-proj" > "$T/b/inbox/opencode-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 7)); stop
+check "EAGAIN/134 is retried and the order succeeds" "$(last_msg)/$(cat "$FAKEMODE.eagain")" "tras reintento/3"
+cp "$T/bin/opencode.real" "$T/bin/opencode"; rm -f "$T/bin/opencode.real" "$T/bin/opencode.eagain"
+echo "installer: Cursor, Copilot and OpenCode accounts"; export PATH="$OLDPATH"
+HC="$T/ihome3"; mkdir -p "$HC/.cursor" "$HC/.copilot" "$HC/.opencode-1" "$HC/.opencode-2"
 instc() { ( cd "$ROOT" && HOME="$HC" BRIDGE_DIR= ./install.sh "$@" ); }
-check "installer --list shows Cursor and Qwen accounts" "$(instc --list --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" 2>&1 | grep -c -e '^cursor ' -e '^qwen ')" "2"
-instc --yes --no-path --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1
+check "installer --list shows Cursor, Copilot and both OpenCode workers" "$(instc --list --cursor-dir "$HC/.cursor" --copilot-dir "$HC/.copilot" --opencode-dir "$HC/.opencode-1" --opencode-dir "$HC/.opencode-2" 2>&1 | grep -c -e '^cursor ' -e '^copilot ' -e '^opencode ')" "4"
+instc --yes --no-path --cursor-dir "$HC/.cursor" --copilot-dir "$HC/.copilot" --opencode-dir "$HC/.opencode-1" --opencode-dir "$HC/.opencode-2" >/dev/null 2>&1
 check "installer writes Cursor skill and provider marker" "$([ -f "$HC/.cursor/skills/agent-bridge/SKILL.md" ] && cat "$HC/.cursor/provider")" "cursor"
-check "installer writes the Qwen block and marker" "$(grep -c BRIDGE-BEGIN "$HC/.qwen/QWEN.md")/$(cat "$HC/.qwen/provider")" "1/qwen"
-check "installer check passes for Cursor and Qwen" "$(instc --check --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1; echo $?)" "0"
+check "installer writes the Copilot block and marker" "$(grep -c BRIDGE-BEGIN "$HC/.copilot/copilot-instructions.md")/$(cat "$HC/.copilot/provider")" "1/copilot"
+check "installer writes both OpenCode markers and names them opencode-1/2" "$(cat "$HC/.opencode-1/provider" "$HC/.opencode-2/provider" | tr '\n' ' ')/$(grep -c 'opencode-[12]$' "$HC/.claude-bridge/names.conf")" "opencode opencode /2"
+check "installer check passes for Cursor, Copilot and OpenCode" "$(instc --check --cursor-dir "$HC/.cursor" --copilot-dir "$HC/.copilot" --opencode-dir "$HC/.opencode-1" --opencode-dir "$HC/.opencode-2" >/dev/null 2>&1; echo $?)" "0"
+check "--opencode-workers N creates N marker folders" "$(HOME="$T/ihome4" bash -c 'mkdir -p "$HOME"; cd "$0" && BRIDGE_DIR= ./install.sh --yes --no-path --opencode-workers 3 >/dev/null 2>&1; ls -d "$HOME"/.opencode-* | wc -l' "$ROOT")" "3"
 # a Cursor-installed `agent` shadowing the bridge command is reported
 mkdir -p "$HC/fakebin/cursor-agent"; printf '#!/bin/sh\necho 2026.11.22-test cursor\n' > "$HC/fakebin/cursor-agent/agent"; chmod +x "$HC/fakebin/cursor-agent/agent"; ln -sfn "$HC/fakebin/cursor-agent/agent" "$HC/fakebin/agent"
-check "installer warns when 'agent' on PATH is Cursor's" "$(PATH="$HC/fakebin:$OLDPATH" instc --check --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" 2>&1 | grep -c "is Cursor's")" "1"
-instc --uninstall --cursor-dir "$HC/.cursor" --qwen-dir "$HC/.qwen" >/dev/null 2>&1
-check "uninstall removes Cursor/Qwen files" "$([ -e "$HC/.cursor/skills/agent-bridge" ] || [ -e "$HC/.qwen/skills/agent-bridge" ] || [ -e "$HC/.qwen/provider" ] && echo left || echo clean)" "clean"
+check "installer warns when 'agent' on PATH is Cursor's" "$(PATH="$HC/fakebin:$OLDPATH" instc --check --cursor-dir "$HC/.cursor" 2>&1 | grep -c "is Cursor's")" "1"
+instc --uninstall --cursor-dir "$HC/.cursor" --copilot-dir "$HC/.copilot" --opencode-dir "$HC/.opencode-1" --opencode-dir "$HC/.opencode-2" >/dev/null 2>&1
+check "uninstall removes Cursor, Copilot and OpenCode files" "$([ -e "$HC/.cursor/skills/agent-bridge" ] || [ -e "$HC/.copilot/skills/agent-bridge" ] || [ -e "$HC/.copilot/provider" ] || [ -e "$HC/.opencode-1/provider" ] || [ -e "$HC/.opencode-2/skills/agent-bridge" ] && echo left || echo clean)" "clean"
 
 echo; echo "passed: $pass  failed: $fail"; [ $fail = 0 ]
