@@ -1,5 +1,5 @@
 ---
-name: review
+name: project-review
 description: Runs a code review against the standards a project already declares. Takes a commit, a path, or a commit narrowed to a path; detects the stack, loads the matching best-practices skills, and reports findings ranked by impact — each with its rule, one sentence of rationale, and a minimal patch. Technology-agnostic: it owns the review process, never the language rules. Use when the user asks to review a commit, the last commit, a file, or a directory, or types /review.
 allowed-tools:
   - Bash

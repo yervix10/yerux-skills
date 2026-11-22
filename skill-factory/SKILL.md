@@ -27,7 +27,7 @@ Per the official [Agent Skills spec](https://platform.claude.com/docs/en/agents-
 | Tier           | Use when…                                                                                      | Files                                                                       | Examples                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | 1 · Minimal    | One stable instruction/procedure, no assets, no versioning                                     | `SKILL.md`                                                                  | `commit`                                                                        |
-| 2 · Procedural | A workflow or tool integration; may bundle helper scripts; benefits from versioning + a README | `SKILL.md`, `metadata.json`, `README.md`, optional `scripts/`, `templates/` | `notion`, `audit`, `review`, `skill-factory`                                    |
+| 2 · Procedural | A workflow or tool integration; may bundle helper scripts; benefits from versioning + a README | `SKILL.md`, `metadata.json`, `README.md`, optional `scripts/`, `templates/` | `neovim-audit`, `project-review`, `skill-factory`                                    |
 | 3 · Compiled   | A large, evolving catalog of many independent rules distributed as one compiled document       | Tier 2 **+** `rules/` **+** `AGENTS.md` (generated)                         | `django-rest-framework-best-practices`, `react-native-with-expo-best-practices` |
 
 **Heuristic:** one instruction → _Tier 1_ · one workflow/tool → _Tier 2_ · many rules needing a single distributable artifact → _Tier 3_.
@@ -67,9 +67,9 @@ Use when the skill encodes a workflow or a tool/_API_ integration. It may bundle
 └── templates/        # optional: copy-ready assets the skill hands out
 ```
 
-**Examples:** `notion` (workflow over an _API_), `audit` (`scripts/audit.py` helper), `review` (three files, nothing else), and `skill-factory` itself (bundles `templates/`).
+**Examples:** `neovim-audit` (`scripts/audit.py` helper), `project-review` (three files, nothing else), and `skill-factory` itself (bundles `templates/`).
 
-**Everything lives in `SKILL.md`.** A _Tier-2_ skill never splits its instructions across side documents — the complete procedure stays in `SKILL.md` so a single read gives the whole picture. Several hundred lines is normal; `notion` and `review` both sit there. Prefer a `scripts/` helper over prose when an operation must be deterministic.
+**Everything lives in `SKILL.md`.** A _Tier-2_ skill never splits its instructions across side documents — the complete procedure stays in `SKILL.md` so a single read gives the whole picture. Several hundred lines is normal; `neovim-audit` and `project-review` both sit there. Prefer a `scripts/` helper over prose when an operation must be deterministic.
 
 **Promote to Tier 3 when** the body stops being one coherent procedure and becomes a large catalog of many independent guidelines that you want to distribute as one compiled document. Outgrowing `SKILL.md` is a signal to promote, never to split the file.
 

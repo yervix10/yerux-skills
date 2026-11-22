@@ -1,5 +1,5 @@
 ---
-name: audit
+name: neovim-audit
 description: Reads and updates the Neovim `audit` plugin's per-project review database, which tracks each file's status (`pending`, `done`, or unaudited). Refuses to modify or propose changes to files already marked `done`, and marks files `pending` or `done` when the user explicitly asks. Use whenever editing, refactoring, or reviewing source files in a project tracked by the audit plugin, or when the user asks about — or asks to change — file review states.
 allowed-tools:
   - Bash
@@ -43,8 +43,8 @@ The plugin stores each project's database in a single, fixed file: `<git-root>/.
 Always use the bundled script rather than parsing or editing that file by hand:
 
 ```bash
-python3 ~/.claude/skills/audit/scripts/audit.py status <path> [<path>...]
-python3 ~/.claude/skills/audit/scripts/audit.py list [--status pending|done|unaudited]
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py status <path> [<path>...]
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py list [--status pending|done|unaudited]
 ```
 
 - `status <path…>` — prints `<icon> <status> <path>` for each file. Exit code is `1` if any target
@@ -60,7 +60,7 @@ has no audit data yet — the database is created on the first status change.
 Only when the user explicitly asks for it (see the directives below):
 
 ```bash
-python3 ~/.claude/skills/audit/scripts/audit.py set pending|done <path> [<path>...]
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py set pending|done <path> [<path>...]
 ```
 
 - Writes the same `<root>/.git/audit.json` the plugin writes, with the same schema and the same
@@ -76,7 +76,7 @@ dedicated flag:
 
 ```bash
 # Every file in the last commit
-python3 ~/.claude/skills/audit/scripts/audit.py set pending $(git diff-tree --no-commit-id -r --name-only HEAD)
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py set pending $(git diff-tree --no-commit-id -r --name-only HEAD)
 ```
 
 ## The Guard (core rule)

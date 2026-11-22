@@ -44,19 +44,19 @@ skill reads and writes directly.
 
 ```bash
 # Status of specific files (exit code 1 if any target is `done`)
-python3 ~/.claude/skills/audit/scripts/audit.py status src/auth.py src/models.py
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py status src/auth.py src/models.py
 
 # Every audited file in the current project
-python3 ~/.claude/skills/audit/scripts/audit.py list
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py list
 
 # Only the files awaiting review
-python3 ~/.claude/skills/audit/scripts/audit.py list --status pending
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py list --status pending
 
 # Change a status (`pending` or `done`); files already at that status are left alone
-python3 ~/.claude/skills/audit/scripts/audit.py set done src/auth.py
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py set done src/auth.py
 
 # Bulk selections come from Git, mirroring the plugin's `bulk_set_*` commands
-python3 ~/.claude/skills/audit/scripts/audit.py set pending $(git diff-tree --no-commit-id -r --name-only HEAD)
+python3 ~/.claude/skills/neovim-audit/scripts/audit.py set pending $(git diff-tree --no-commit-id -r --name-only HEAD)
 ```
 
 ## Why it writes the database directly

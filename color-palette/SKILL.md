@@ -1,5 +1,5 @@
 ---
-name: "palette"
+name: color-palette
 description: 'Generates color palettes of 11 shades in the Tailwind style from one or more hex codes, delivered as a variables JSON ready to import into Figma (with a `DEFAULT` entry that is an alias to the shade holding the original color), together with the RGB, CMYK and HSL values of each color. Use it whenever the user passes one or more hex codes (for example F9AE00, #E43636 or "Primary: 4A90E2") and wants a color palette, shades, a Tailwind-style scale, a Figma variables file, or the RGB, CMYK and HSL values of a color. Also use it for requests such as "generate a palette", "create the shades of this color" or "paleta de colores".'
 ---
 
