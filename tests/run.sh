@@ -3,6 +3,7 @@
 # alerts, stalls and worktrees. Usage: tests/run.sh
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; OLDPATH="$PATH"
+export BRIDGE_OPENCODE_AUTO=0
 T="$(mktemp -d)"; trap 'kill $RP 2>/dev/null; rm -rf "$T"' EXIT; RP=""
 S="$T/scripts"; mkdir -p "$S" "$T/bin" "$T/b/inbox/w2" "$T/home/.codex-fake" "$T/b/inbox/w1" "$T/b/inbox/kiro-1" "$T/b/inbox/agy-1" "$T/b/inbox/cursor-1" "$T/b/inbox/copilot-1" "$T/b/inbox/opencode-1" "$T/b/inbox/opencode-2" "$T/home/cursorhome/.cursor" "$T/home/copilothome/.copilot" "$T/home/.opencode-1" "$T/home/.opencode-2" "$T/b/inbox/adm" "$T/b/runs" "$T/home/.claude-fake" "$T/home/.kiro-fake" "$T/home/agyhome/.gemini/antigravity-cli" "$T/proj"
 cp -a "$ROOT/agent-bridge/scripts/." "$S/"
@@ -291,7 +292,7 @@ check "Antigravity context is estimated from tokens" "$("$S/bridge-usage" agy-1 
 check "Antigravity usage shows set model and effort" "$("$S/bridge-usage" agy-1 | cut -f1,8)" "gemini-3.8-flash-high	high"
 AJSON="$(BRIDGE_NAME=adm "$S/agent" dashboard --json)"
 check "Antigravity dashboard row has kind, no quota windows" "$(printf '%s' "$AJSON" | jq -r '.agents[]|select(.name=="agy-1")|[.kind,.five_hour.used,.weekly.used,.monthly.used,.tier]|@tsv')" "antigravity				normal"
-check "Antigravity feed reads its live log" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" agy-1 2>/dev/null | jq -r '[.[]|select(.role=="tool")|.tool]|first' 2>/dev/null)" "run_command"
+check "Antigravity feed reads its live log" "$(BRIDGE_DIR="$T/b" node "$S/bridge-feed" agy-1 --json 2>/dev/null | jq -r "[.events[]|select(.role==\"tool\")|.tool]|first" 2>/dev/null)" "run_command"
 echo limit > "$T/mode"; printf 'From: adm\nTo: agy-1\nDate: x\nCwd: %s\n\nthird\n' "$T/agy-proj" > "$T/b/inbox/agy-1/$(date +%s%N)-de-adm.msg"; wait_reply $((base_count + 3)); stop
 check "Antigravity quota error pauses the worker as LIMIT" "$(last_msg | head -c 6)" "LIMIT:"
 check "Antigravity pause is recorded" "$(sed -n 's/^last_kind=//p' "$T/b/runs/agy-1.state")" "limit"

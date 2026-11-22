@@ -116,7 +116,7 @@ if command -v copilot >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copilot" ] || [ 
 # (they hold `provider`=opencode, AGENTS.md and the skill). --opencode-workers N creates the first N markers.
 if [ "$OC_WORKERS" -gt 0 ] && [ "$DRY" = 0 ]; then i=1; while [ "$i" -le "$OC_WORKERS" ]; do mkdir -p "$HOME/.opencode-$i"; i=$((i+1)); done; fi
 for d in "$HOME"/.opencode-*; do [ -d "$d" ] && add_dir opencode "$d"; done
-if [ -z "$OPENCODE_LIST" ] && { command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/opencode" ]; } && [ "$DRY" = 0 ]; then mkdir -p "$HOME/.opencode-1"; add_dir opencode "$HOME/.opencode-1"; fi
+if [ -z "$OPENCODE_LIST" ] && [ "${BRIDGE_OPENCODE_AUTO:-1}" != 0 ] && { command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/opencode" ]; } && [ "$DRY" = 0 ]; then mkdir -p "$HOME/.opencode-1"; add_dir opencode "$HOME/.opencode-1"; fi
 # current environment
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] && add_dir claude "$CLAUDE_CONFIG_DIR"
 [ -n "${CODEX_HOME:-}" ] && add_dir codex "$CODEX_HOME"

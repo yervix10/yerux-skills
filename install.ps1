@@ -94,7 +94,7 @@ if ((Get-Command copilot -ErrorAction SilentlyContinue) -or (Test-Path (Join-Pat
 # OpenCode: ONE install (credentials shared) with N workers; each worker is a marker folder .opencode-1, .opencode-2, ... (-OpenCodeWorkers N creates them)
 if ($OpenCodeWorkers -gt 0 -and -not $DryRun) { 1..$OpenCodeWorkers | ForEach-Object { New-Item -ItemType Directory -Force -Path (Join-Path $UserHome ".opencode-$_") | Out-Null } }
 foreach ($d in (Get-ChildItem $UserHome -Directory -Force -Filter '.opencode-*' -ErrorAction SilentlyContinue | Sort-Object { [int](($_.Name -split '-')[-1] -replace '\D', '0') })) { Add-Dir 'opencode' $d.FullName }
-if ($OpenCode.Count -eq 0 -and (Get-Command opencode -ErrorAction SilentlyContinue) -and -not $DryRun) { New-Item -ItemType Directory -Force -Path (Join-Path $UserHome '.opencode-1') | Out-Null; Add-Dir 'opencode' (Join-Path $UserHome '.opencode-1') }
+if ($OpenCode.Count -eq 0 -and $env:BRIDGE_OPENCODE_AUTO -ne '0' -and (Get-Command opencode -ErrorAction SilentlyContinue) -and -not $DryRun) { New-Item -ItemType Directory -Force -Path (Join-Path $UserHome '.opencode-1') | Out-Null; Add-Dir 'opencode' (Join-Path $UserHome '.opencode-1') }
 # Google Antigravity (agy): one account per HOME (.gemini\antigravity-cli); its sign-in lives in the system, not in that folder
 if ((Get-Command agy -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path $UserHome '.gemini\antigravity-cli'))) { $ad = Join-Path $UserHome '.gemini\antigravity-cli'; if (-not $DryRun) { Ensure-Dir $ad }; Add-Dir 'antigravity' $ad }
 foreach ($scope in 'Process', 'User', 'Machine') {
