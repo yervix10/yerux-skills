@@ -1,23 +1,78 @@
-# yerux - skills
+# yerux-skills
 
-A collection of Agent Skills for Claude Code and Codex, with a one-line installer.
-**agent-bridge** is the featured package (sessions from different accounts that talk to each other); every other
-folder under `skills/` with a `SKILL.md` is an optional skill you can tick in the installer.
+A collection of **Agent Skills** for Claude Code and Codex, plus **agent-bridge**, a tool that lets AI coding sessions from
+different accounts and different CLIs talk to each other on one machine. Everything installs with one command, and every
+skill follows the same naming scheme and folder layout.
 
 ## Install
 
+Linux, macOS, WSL:
+
     curl -fsSL https://raw.githubusercontent.com/yervix10/yerux-skills/main/get.sh | bash
+
+Windows:
+
     powershell -c "irm https://raw.githubusercontent.com/yervix10/yerux-skills/main/get.ps1 | iex"
 
-The installer finds your Claude Code / Codex accounts and opens a menu:
-`↑ ↓` move · `space` select · `enter` continue (`r` renames and `+` adds an account on the first page).
-Without a terminal it installs agent-bridge into every account found. Options after `bash -s --`:
+The installer finds your Claude Code and Codex accounts (and Kiro, Antigravity, Cursor, Copilot and OpenCode when present)
+and opens a menu: `↑ ↓` move · `space` select · `enter` continue (`r` renames and `+` adds an account on the first page).
+Without a terminal it installs agent-bridge into every account it finds.
 
-    --yes                     no menu
-    --skills a,b | all | none extra skills to install (default: none)
-    --list | --dry-run | --uninstall (removes agent-bridge only)
+Options after `bash -s --`:
 
-On Windows pass the same options with `$env:AGENT_BRIDGE_ARGS='-Yes -Skills all'`.
-Pin a version with `AGENT_BRIDGE_REF=<tag>`.
+    --yes                      no menu
+    --skills a,b | all | none  extra skills to install (default: none)
+    --list | --dry-run | --check [--fix] | --uninstall
 
-From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows). Details: [skills/agent-bridge/README.md](skills/agent-bridge/README.md).
+On Windows pass the same options with `$env:AGENT_BRIDGE_ARGS='-Yes -Skills all'`. Pin a version with `AGENT_BRIDGE_REF=<tag>`.
+From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows).
+`--uninstall` removes agent-bridge and the extra skills the installer added; the mailbox `~/.claude-bridge` is kept.
+
+## Repository layout
+
+    skills/               every skill, one folder each, named <topic>-<type>
+      agent-bridge/       the featured package: scripts, runners, desktop widget, Windows port, tests
+      …                   the other skills (below)
+    lib/ui.sh             terminal UI helpers shared by the installers
+    install.sh / .ps1     installers (Linux/macOS/WSL, Windows)
+    get.sh / .ps1         one-line bootstrap: downloads the repo and runs the installer
+    .github/workflows/    CI: shell and PowerShell syntax, security and feed tests on Linux and macOS
+
+## Skills
+
+| Skill | What it gives you |
+|---|---|
+| **agent-bridge** | `/admin`, `/agent`, `/dashboard`: one session orchestrates headless workers (Claude, Codex, Kiro, Antigravity, Cursor, Copilot, OpenCode) through a file mailbox. Per-worker git worktrees, usage-aware work assignment, live dashboard and desktop widget. See [skills/agent-bridge/README.md](skills/agent-bridge/README.md). |
+| **astro-best-practices** | Production Astro 7 sites: static by default, `.astro` before framework components, typed content collections, SEO generated from the content schema, TailwindCSS v4. |
+| **html-best-practices** | Framework-agnostic semantic HTML, landmarks, headings, content elements and the TailwindCSS v4 theme. |
+| **react-core-best-practices** | React on any platform: effects and state, derived values, list identity, typed React Query layer, composition, typing. |
+| **react-best-practices** | React on the web: forms with react-hook-form and shadcn/ui, and the shadcn/ui generator contract. |
+| **react-native-with-expo-best-practices** | React Native with Expo: NativeWind, Expo Router layout, native config through `app.json` plugins. |
+| **django-rest-framework-best-practices** | Django and DRF: ORM efficiency, serialization strategy, API security. |
+| **git-best-practices** | Conventional Commits, Conventional Branch naming (with an agent-authored prefix) and a `/commit` command. |
+| **project-review** | Code review of a commit or path against the standards the project already declares, loading the matching best-practices skills. |
+| **deployment-workflow** | Security-first deployment over SSH: per-repo deploy keys, Docker Compose behind a shared Caddy proxy. |
+| **design-system-factory** | Create, extend and audit a brand design system: tokens, assets, components, print stationery, governance. |
+| **color-palette** | 11-shade Tailwind-style palettes from hex codes, as a Figma-ready variables JSON with RGB, CMYK and HSL values. |
+| **neovim-audit** | Reads and updates the Neovim `audit` plugin's per-project file review state and refuses to touch files marked done. |
+| **skill-factory** | Guide and templates for writing new skills in this collection. |
+
+## Conventions
+
+- **Names** are kebab-case and always `<topic>-<type>` (`git-best-practices`, `color-palette`, `neovim-audit`); the folder name equals the `name:` in `SKILL.md`.
+- **Tiers** (see `skills/skill-factory`): a one-file procedure, a skill with `metadata.json`, `README.md` and `scripts/`, or a rule catalog with `rules/` and a compiled `AGENTS.md`. Pick the smallest tier that fits.
+- **Every skill** has a `SKILL.md` with `name` and `description` front matter; the installer lists whatever it finds under `skills/`.
+
+## Adding a skill
+
+Create `skills/<topic>-<type>/` following `skills/skill-factory`, then run `./install.sh --list` to confirm it shows up.
+
+## Tests and CI
+
+    bash skills/agent-bridge/tests/run.sh      # security boundary, activity feed, widget
+
+GitHub Actions checks the syntax of every shell and PowerShell script and runs the security and feed tests on Linux and macOS.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

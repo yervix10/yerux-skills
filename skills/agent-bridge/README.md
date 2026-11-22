@@ -56,7 +56,7 @@ with `./install.sh --statusline` (wraps the account's status line, which keeps l
 Claude context is computed from each assistant usage event using the model's cached context window, before a turn emits its final `result`; when a live log has no assistant event yet, the last measured percentage and its age remain visible. The `claude-sonnet-5-5` and `claude-opus-5-5` fallback windows are 1,000,000 tokens.
 `BRIDGE_REASSIGN=1` (or `REASSIGN=1` in config): when a worker hits a usage limit its order goes to an idle worker.
 `./install.sh --safe` / `BRIDGE_BYPASS=safe`: workers can edit files but Claude cannot run arbitrary commands unprompted.
-`./install.sh --check --fix` repairs only the accounts that fail the check. Tests: `tests/run.sh` (also run by CI).
+`./install.sh --check --fix` repairs only the accounts that fail the check. Tests: `skills/agent-bridge/tests/run.sh` (security boundary, activity feed and widget; also run by CI).
 
 ## Windows
 
