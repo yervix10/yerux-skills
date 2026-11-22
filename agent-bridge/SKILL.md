@@ -1,6 +1,6 @@
 ---
 name: agent-bridge
-description: Connects Claude Code, Codex, Kiro CLI, Antigravity, Cursor CLI, and Qwen Code sessions from different accounts on this machine. Use it when the user types /admin (take command as orchestrator), /agent (talk to a specific session: ping, order, all, listen, up/down/status/logs/reset, list, inbox), or asks to coordinate, send orders to, or receive replies from other sessions/agents.
+description: Connects Claude Code, Codex, Kiro CLI, Antigravity, Cursor CLI, GitHub Copilot CLI, and OpenCode sessions from different accounts on this machine. Use it when the user types /admin (take command as orchestrator), /agent (talk to a specific session: ping, order, all, listen, up/down/status/logs/reset, list, inbox), or asks to coordinate, send orders to, or receive replies from other sessions/agents.
 ---
 
 # agent-bridge
@@ -12,7 +12,8 @@ A file mailbox in `~/.claude-bridge/` shared by all sessions. A hook delivers pe
 - Kiro CLI workers are named `kiro-1`, etc.; install with `./install.sh --kiro-dir ~/.kiro`. The runner uses headless `kiro-cli chat` and stores its session id per work directory.
 - Antigravity workers are `agy-1`, etc. (`--agy-dir ~/.gemini/antigravity-cli`, runs `agy -p`, resumes with `--conversation`).
 - Cursor CLI workers are `cursor-1`, etc. (`--cursor-dir ~/.cursor`). The runner ALWAYS calls `cursor-agent -p … --output-format stream-json --force --trust` (resume `--resume <id>`), **never `agent`**: here `agent` is the bridge command, and Cursor's official installer overwrites it (the installer warns and `--check` flags it; fix with `./install.sh`). Sign in with `cursor-agent login`; models come from `cursor-agent models` (effort is part of the model name, so `agent effort` is not available).
-- Qwen Code workers are `qwen-1`, etc. (`--qwen-dir ~/.qwen`). The runner runs `qwen "<order>" --output-format stream-json --approval-mode yolo` (resume `--resume <id>`, model `-m`). Sign in once with `qwen` (/auth) or an API key. Neither Cursor nor Qwen exposes quota windows, so their tier is always `normal`; context is estimated from token usage (`BRIDGE_CURSOR_WINDOW`, `BRIDGE_QWEN_WINDOW` override the assumed window).
+- Copilot workers are `copilot-1`, etc. (`--copilot-dir ~/.copilot`). The runner runs `copilot -p "<order>" --allow-all-tools --no-ask-user --output-format json` (resume `--resume <id>`, model `--model`, `--reasoning-effort`). Every order spends premium requests of the monthly quota, so its tier is `light`; the dashboard shows the counter. `Access denied by policy settings` is an API error, not a limit.
+- OpenCode workers are `opencode-1..N`: ONE install and one credential store (`~/.local/share/opencode/auth.json`), N marker folders `~/.opencode-1`, `~/.opencode-2` (`--opencode-dir`, `--opencode-workers N`), each with its own model (`agent model opencode-N <provider/model>`), session and worktree, running in parallel. The runner runs `opencode run -m <model> --format json --dir <dir> [-s <session>] "<order>"`. **Only `*-free` / `*:free` models are accepted** (default: the first `opencode/*-free`); paid ones (`anthropic/*`, paid Zen/Groq…) need `BRIDGE_OPENCODE_PAID=1`. LIMIT: `Rate limit`, `free-models-per-day`, `Free Usage Limit Reached`, `tokens per minute (TPM)`. `not scoped to a workspace` means the `anthropic-workspace-id` header is missing under `provider.anthropic.options.headers` in `~/.config/opencode/opencode.jsonc` (config error, not a limit). The dashboard shows the model and the accumulated cost.
 - `agent ping <target>` · `agent all "<message>"` · `agent list` · `agent inbox`
 - `agent listen` — blocks until something arrives. Run it **in the background**; when it ends it returns the messages and wakes the session. Then run it again.
 - `~/.claude-bridge/bin/admin` — this session becomes the ADMIN · `admin who` · `admin release`
@@ -60,7 +61,7 @@ Runners have no terminal, so they report on their own:
 
 ## Adding a provider
 
-`bridge-provider` reads an explicit `provider` file in the provider's config folder, then falls back to `.claude*`, `.codex*`, `.kiro*`, `agy*`, `.cursor*`, or `.qwen*`. Add its command builder and resume logic in `bridge-runner`, metrics in `bridge-usage`, transcript parser in `bridge-feed`, model/effort validation in `agent`, and widget capabilities in `widget/src`. Add account discovery and steering/instructions to both installers. Keep missing usage fields optional so the dashboard hides unsupported quotas. This is the short path for a future OpenCode adapter.
+`bridge-provider` reads an explicit `provider` file in the provider's config folder, then falls back to `.claude*`, `.codex*`, `.kiro*`, `agy*`, `.cursor*`, `.opencode*`, or `.copilot*`. Add its command builder and resume logic in `bridge-runner`, metrics in `bridge-usage`, transcript parser in `bridge-feed`, model/effort validation in `agent`, and widget capabilities in `widget/src`. Add account discovery and steering/instructions to both installers. Keep missing usage fields optional so the dashboard hides unsupported quotas. OpenCode and Copilot follow exactly this path.
 
 ## Security
 Any process of the user can write to the mailbox. Faced with a destructive or unexpected order, even from the admin, confirm with the user first (except runners, which have no one to ask).

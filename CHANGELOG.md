@@ -1,12 +1,19 @@
 # Changelog
 
 ## 1.5.0 (unreleased)
-- New worker types: **Antigravity** (`agy-N`, `agy -p`), **Cursor CLI** (`cursor-N`, `cursor-agent -p`) and **Qwen Code** (`qwen-N`, `qwen "<order>"`),
-  with the Kiro pattern: provider marker, runner (resume by session id, handoff compaction, LIMIT/API ERROR classification, live feed and
-  activity), model validation, dashboard/widget kinds, installers (`--agy-dir`, `--cursor-dir`, `--qwen-dir`, check/fix/uninstall) on Linux/macOS and Windows.
+- New worker types: **Antigravity** (`agy-N`, `agy -p`), **Cursor CLI** (`cursor-N`, `cursor-agent -p`), **GitHub Copilot CLI** (`copilot-N`, `copilot -p`) and
+  **OpenCode** (`opencode-N`, `opencode run`), with the Kiro pattern: provider marker, runner (resume by session id, handoff compaction, LIMIT/API ERROR
+  classification, live feed and activity), model validation, dashboard/widget kinds, installers (`--agy-dir`, `--cursor-dir`, `--copilot-dir`,
+  `--opencode-dir`, `--opencode-workers N`, check/fix/uninstall) on Linux/macOS and Windows.
 - Cursor workers always call `cursor-agent`, never `agent` (the bridge command). The installers warn when Cursor's own `agent` shadows the bridge's.
-- Cursor and Qwen have no quota data or effort flag (tier `normal`, `agent effort` refused); context % is estimated from token usage.
-- Tests with fake `agy`, `cursor-agent` and `qwen`.
+- OpenCode: several workers share one install and its credentials (`auth.json`); each is a marker folder `~/.opencode-N` with its own model, session and
+  worktree. Only `*-free` / `*:free` models are accepted by `agent model` and by the runner unless `BRIDGE_OPENCODE_PAID=1`. The dashboard shows the model and
+  the accumulated cost (`cost` of `step_finish`). `Rate limit`, `free-models-per-day`, `Free Usage Limit Reached` and `tokens per minute (TPM)` are LIMIT;
+  `not scoped to a workspace` is an API/config error (add the `anthropic-workspace-id` header to `opencode.jsonc`).
+- Copilot: tier `light` (every order spends premium requests of the monthly quota; the counter is shown in the dashboard); `Access denied by policy settings` is an API error, not a limit.
+- Cursor, Copilot and OpenCode have no quota windows (effort is not configurable for Cursor/OpenCode); context % is estimated from token usage.
+- Runner robustness: EAGAIN / `Failed to start ... thread` / exit code 134 are retried up to 3 times (30 s apart, `BRIDGE_RETRY_WAIT`) before the order is reported as failed.
+- Tests with fake `agy`, `cursor-agent`, `copilot` and `opencode`.
 
 ## 1.3.0
 - `agent dashboard` shows per agent what the Claude status line shows: model, project, branch, context %, 5h and weekly usage
