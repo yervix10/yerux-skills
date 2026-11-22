@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bridge-runner <name>: terminal-less worker. Waits for the admin's orders in its inbox, runs them with
-# `claude -p` / `codex exec` / `kiro-cli chat` / `agy -p` / `cursor-agent -p` (with memory: resumes the conversation per working directory) and replies to the admin.
+# `claude -p` / `codex exec` / `kiro-cli chat` / `agy -p` / `cursor-agent -p` / `opencode run` / `copilot -p` (with memory: resumes the conversation per working directory) and replies to the admin.
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-runner <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"
 [ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
@@ -31,6 +31,10 @@ if [ "$BYPASS" = 1 ]; then CLAUDE_PERM=(--dangerously-skip-permissions); CODEX_P
 AGY_PERM=(--dangerously-skip-permissions); [ "$BYPASS" = safe ] && AGY_PERM=(--mode accept-edits); [ "$BYPASS" = 0 ] && AGY_PERM=(--mode plan)
 # Cursor (cursor-agent): bypass=1 runs everything (--force); safe edits files but shell commands stay denied; 0 = plan mode (read-only).
 CURSOR_PERM=(--force --trust); [ "$BYPASS" = safe ] && CURSOR_PERM=(--trust); [ "$BYPASS" = 0 ] && CURSOR_PERM=(--trust --mode plan)
+# GitHub Copilot: bypass=1 allows every tool; safe/0 only read tools (no shell, no writes).
+COPILOT_PERM=(--allow-all-tools); [ "$BYPASS" = safe ] || [ "$BYPASS" = 0 ] && COPILOT_PERM=(--allow-tool=read)
+# OpenCode: models cost money unless they end in -free (or are openrouter ...:free). Paid ones need BRIDGE_OPENCODE_PAID=1.
+oc_model_ok() { case "$1" in *-free|*:free) return 0;; esac; [ "${BRIDGE_OPENCODE_PAID:-0}" = 1 ]; }
 log "bypass=$BYPASS"
 # ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
 ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"
@@ -52,6 +56,10 @@ act() { [ -s "$LIVE" ] || return 0
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.event=="step_update")|.step_update|select(.step_type=="tool" and .state=="ACTIVE")|"\(.tool_name // "tool") \((.tool_info.parameters // {})|(.CommandLine // .AbsolutePath // .Query // .TargetFile // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   elif [ "$kind" = cursor ]; then
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="tool_call" and .subtype=="started")|.tool_call|to_entries[0]|"\(.key|sub("ToolCall$";"")) \((.value.args // {})|(.command // .path // .pattern // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = opencode ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="tool_use")|.part|"\(.tool // "tool") \((.state.input // {})|(.command // .filePath // .pattern // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = copilot ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select((.type//"")|test("^tool\\.execution_start"))|"\(.data.toolName // "tool") \((.data.arguments // {})|(.command // .path // .pattern // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   else
   S_ACT="$(tail -n 40 "$LIVE" | jq -r 'select(.type=="assistant")|.message.content[]?|select(.type=="tool_use")|"\(.name) \((.input.command // .input.file_path // .input.pattern // .input.description // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   fi
@@ -81,6 +89,8 @@ agy_window() { local m; [[ "${BRIDGE_AGY_WINDOW:-}" =~ ^[0-9]+$ ]] && { echo "$B
 cq_window() { local v m
   v="${BRIDGE_CURSOR_WINDOW:-}"; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }
   m="$(cat "$B/models/$name" 2>/dev/null)"; case "$m" in *1m*|*sol*|*fable*|*opus-5*) echo 1000000;; *) echo 200000;; esac; }
+# oc_window: context window assumed for OpenCode / Copilot (BRIDGE_OPENCODE_WINDOW / BRIDGE_COPILOT_WINDOW override)
+oc_window() { local v; if [ "$kind" = copilot ]; then v="${BRIDGE_COPILOT_WINDOW:-}"; else v="${BRIDGE_OPENCODE_WINDOW:-}"; fi; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }; echo 128000; }
 # ctx_now: context used (%) by this worker, as of the end of its previous order (empty when unknown)
 ctx_now() { local used win
   if [ "$kind" = claude ]; then [ -s "$LIVE" ] || return 0
@@ -95,6 +105,10 @@ ctx_now() { local used win
     [ -s "$LIVE" ] || return 0
     used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$LIVE" 2>/dev/null | tail -1)"
     win="$(cq_window)"; [[ "$used" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((used * 100 / win))
+  elif [ "$kind" = opencode ]; then # context = the last step's total tokens vs. an assumed window
+    [ -s "$LIVE" ] || return 0
+    used="$(jq -r 'select(.type=="step_finish")|.part.tokens.total // empty' "$LIVE" 2>/dev/null | tail -1)"
+    win="$(oc_window)"; [[ "$used" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((used * 100 / win))
   elif [ "$kind" = kiro ]; then
     local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
     f="$(find "$dir/sessions" -path "*/$sess/messages.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
@@ -191,8 +205,8 @@ manual_compact() {
   fi
   [ -d "$cwd" ] || { log "manual compaction unavailable: saved project directory is missing or unknown"; return 1; }
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"; eff="$(cat "$B/effort/$name" 2>/dev/null)"
-  if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro|antigravity|cursor) MODEL_ARGS=(--model "$mdl");; esac; fi
-  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; kiro|antigravity|cursor|copilot) MODEL_ARGS=(--model "$mdl");; opencode) MODEL_ARGS=(-m "$mdl");; esac; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; copilot) MODEL_ARGS+=(--reasoning-effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   add_codex_compact_arg
   log "manual compaction requested"; maybe_compact 1
   return 0
@@ -208,7 +222,9 @@ REASSIGN="${BRIDGE_REASSIGN:-$(sed -n 's/^REASSIGN=//p' "$B/config" 2>/dev/null 
 # classify <rc> <text> -> ok | limit | api | timeout | error
 classify() { local rc="$1" low; low="$(printf '%s' "$2" | tr 'A-Z' 'a-z')"
   [ "$rc" = 124 ] && { echo timeout; return; }
+  case "$low" in *"not scoped to a workspace"*) echo api; return;; *"access denied by policy"*|*"authentication required"*) echo api; return;; esac
   if [ "$rc" != 0 ]; then
+    case "$low" in *"free-models-per-day"*|*"free usage limit reached"*|*"tokens per minute"*|*"you've hit your usage limit"*) echo limit; return;; esac
     case "$low" in *"usage limit"*|*"rate limit"*|*"rate_limit"*|*"limit reached"*|*"hit your limit"*|*quota*|*"too many requests"*|*"credit balance"*|*resource_exhausted*|*"resource exhausted"*|*"429"*|*"out of credits"*|*"quota exceeded"*|*"limit will reset"*|*"resets at"*|*"resets in"*) echo limit; return;;
       *overloaded*|*"api error"*|*"authentication"*|*"not signed in"*|*"not logged in"*|*"sign in"*|*"invalid api key"*|*"invalid x-api-key"*|*econnrefused*|*econnreset*|*"network error"*|*"503"*|*"529"*|*"502"*|*"401"*|*unauthorized*) echo api; return;; esac
     echo error; return; fi
@@ -261,17 +277,19 @@ while true; do
 
 Order:
 $body"
-  if [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ]; then prompt="$prompt
+  if [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = opencode ] || [ "$kind" = copilot ]; then prompt="$prompt
 
 Do not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text."; fi
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
   MODEL_ARGS=(); mdl="$(cat "$B/models/$name" 2>/dev/null)"   # set by the admin with `agent model`
-  if [ -n "$mdl" ]; then case "$kind" in claude|kiro|antigravity|cursor) MODEL_ARGS=(--model "$mdl");; codex) MODEL_ARGS=(-m "$mdl");; esac; fi
+  if [ -n "$mdl" ]; then case "$kind" in claude|kiro|antigravity|cursor|copilot) MODEL_ARGS=(--model "$mdl");; codex|opencode) MODEL_ARGS=(-m "$mdl");; esac; fi
   eff="$(cat "$B/effort/$name" 2>/dev/null)"   # reasoning effort, also set by the admin (`agent effort`)
-  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
+  if [ -n "$eff" ]; then case "$kind" in claude|kiro|antigravity) MODEL_ARGS+=(--effort "$eff");; copilot) MODEL_ARGS+=(--reasoning-effort "$eff");; codex) MODEL_ARGS+=(-c "model_reasoning_effort=\"$eff\"");; esac; fi
   add_codex_compact_arg
   maybe_compact
   S_STATUS=working; S_SINCE=$(date +%s); S_ORDER="$(printf '%s' "$body" | head -c 100 | tr '\n' ' ')"; sw
+  attempt=0
+  while :; do
   tmp="$(mktemp)"; rc=0
   if [ "$kind" = claude ]; then
     if [ -f "$sf" ]; then args=(--resume "$(cat "$sf")"); new=0
@@ -317,6 +335,39 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     id="$(jq -r 'select(.event=="result")|.result.conversation_id // empty' "$LIVE" 2>/dev/null | tail -1)"
     [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
     RESET_AT=""
+  elif [ "$kind" = opencode ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    ocm="$mdl"; [ -n "$ocm" ] || ocm="${BRIDGE_OPENCODE_MODEL:-$(opencode models 2>/dev/null | grep -m1 '^opencode/.*-free$')}"
+    if [ -z "$ocm" ] || ! oc_model_ok "$ocm"; then
+      rc=1; printf 'OpenCode model "%s" is not free. Pick an opencode/*-free or openrouter/...:free model with: agent model %s <provider/model> (paid models need BRIDGE_OPENCODE_PAID=1).\n' "$ocm" "$name" > "$tmp"
+    else
+      session_args=(); [ -f "$sf" ] && session_args=(-s "$(cat "$sf")")
+      # all opencode-N workers share one install (auth.json); each has its own session and working directory
+      ( cd "$cwd" || exit 1; BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" opencode run -m "$ocm" --format json --dir "$cwd" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+      jq -r 'select(.type=="text")|.part.text // empty' "$LIVE" 2>/dev/null > "$tmp"
+      errs="$(jq -r 'select(.type=="error")|(.error.data.message // .error.message // .error.name // "error")' "$LIVE" 2>/dev/null | tr '\n' ' ')"
+      [ -n "$errs" ] && [ "$rc" = 0 ] && rc=1
+      [ -s "$tmp" ] && [ "$rc" != 0 ] && : > "$tmp"
+      [ -s "$tmp" ] || { printf '%s\n' "$errs"; cat "$LIVE.err"; } | tail -c 3000 > "$tmp"
+      case "$(tr 'A-Z' 'a-z' < "$tmp")" in *"not scoped to a workspace"*) printf '\nConfig error: add the anthropic-workspace-id header under provider.anthropic.options.headers in ~/.config/opencode/opencode.jsonc.\n' >> "$tmp";; esac
+      id="$(jq -r '.sessionID // empty' "$LIVE" 2>/dev/null | tail -1)"
+      [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+      oc_cost="$(jq -rs '[.[]|select(.type=="step_finish")|.part.cost // 0]|add // 0' "$LIVE" 2>/dev/null)"
+      awk -v c="${oc_cost:-0}" -v f="$B/runs/$name.cost" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%.6f\n", t+c > f}'
+    fi
+    RESET_AT=""
+  elif [ "$kind" = copilot ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    session_args=(); [ -f "$sf" ] && session_args=(--resume "$(cat "$sf")")
+    ( cd "$cwd" || exit 1; BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" copilot -p "$prompt" --no-ask-user --output-format json "${COPILOT_PERM[@]}" "${MODEL_ARGS[@]}" "${session_args[@]}" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+    ec="$(jq -r 'select(.type=="result")|.exitCode // empty' "$LIVE" 2>/dev/null | tail -1)"; [ -n "$ec" ] && [ "$ec" != 0 ] && [ "$rc" = 0 ] && rc=1
+    jq -r 'select((.type//"")|test("^assistant\\.message"))|(.data.content // .content // empty)' "$LIVE" 2>/dev/null | grep -v '^$' | tail -n 200 > "$tmp"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
+    id="$(jq -r 'select(.type=="result")|.sessionId // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
+    pr="$(jq -r 'select(.type=="result")|.usage.premiumRequests // empty' "$LIVE" 2>/dev/null | tail -1)"
+    [[ "$pr" =~ ^[0-9.]+$ ]] && awk -v c="$pr" -v f="$B/runs/$name.premium" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%s\n", t+c > f}'
+    RESET_AT=""
   else
     : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
     session_args=(); [ -f "$sf" ] && session_args=(--resume-id "$(cat "$sf")")
@@ -357,6 +408,10 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     RESET_AT=""
   fi
   res="$(head -c 6000 "$tmp")"; rm -f "$tmp"
+  # process saturation (EAGAIN / thread start failure / abort 134) is transient: retry after 30 s, up to 3 times, before reporting
+  if [ "$rc" != 0 ] && [ "$attempt" -lt 3 ] && { [ "$rc" = 134 ] || printf '%s %s' "$res" "$(tail -c 2000 "$LIVE.err" 2>/dev/null)" | grep -qiE 'eagain|resource temporarily unavailable|failed to start .*thread|cannot allocate memory|unable to create (new )?thread'; }; then
+    attempt=$((attempt + 1)); log "transient failure (rc=$rc), retry $attempt/3 in ${BRIDGE_RETRY_WAIT:-30}s"; sleep "${BRIDGE_RETRY_WAIT:-30}"; continue; fi
+  break; done
   verdict="$(classify "$rc" "$res")"
   case "$verdict" in
     limit)
