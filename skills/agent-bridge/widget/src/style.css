@@ -107,6 +107,8 @@ main::-webkit-scrollbar { width: 6px; }
 main::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 40%, transparent); border-radius: 4px; }
 main::-webkit-scrollbar-track { background: transparent; }
 #agents { display: grid; gap: 8px; }
+#attention { display: grid; gap: 8px; }
+#attention:empty { display: none; }
 #admins, .group-list { display: grid; gap: 8px; }
 .agent-group { display: grid; gap: 5px; min-width: 0; }
 .group-toggle {
@@ -137,8 +139,8 @@ main::-webkit-scrollbar-track { background: transparent; }
   border-radius: 12px;
   transition: background-color .18s ease;
 }
-.agent-admin { background: var(--card); }
-.agent-admin:hover { background: var(--card-hover); }
+.agent-admin { background: color-mix(in srgb, var(--admin-accent) 10%, #fff); }
+.agent-admin:hover { background: color-mix(in srgb, var(--admin-accent) 15%, #fff); }
 .agent-admin .state-admin, .agent-admin .badge-admin { color: var(--admin-accent); }
 .agent-admin .badge-admin { background: color-mix(in srgb, var(--admin-accent) 10%, #fff); border-color: transparent; }
 .agent:hover { background: var(--card-hover); }
@@ -167,7 +169,9 @@ main::-webkit-scrollbar-track { background: transparent; }
 .state-working { color: var(--green); }
 .state-idle, .state-off { color: var(--muted); }
 .state-limited, .state-stuck, .state-unknown { color: var(--amber); }
-.state-stuck { color: var(--red); }
+.state-stuck, .state-auth { color: var(--red); }
+.auth-note { margin-top: 7px; padding: 7px 9px; color: var(--red); background: color-mix(in srgb, var(--red) 8%, #fff); border-radius: 8px; font-size: 10px; line-height: 1.45; }
+.agent-auth .metrics { opacity: .55; }
 .state-working::before { animation: pulse 2.2s ease-in-out infinite; }
 .badge, .tier, .effort-badge, .model-badge {
   flex: none;

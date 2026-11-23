@@ -22,7 +22,7 @@
 
   function sortAgents(agents, mode = 'urgency') {
     if (mode === 'manual') return [...agents];
-    const rank = { limited: 0, stuck: 1, working: 2, idle: 3, admin: 4, unknown: 5, off: 6 };
+    const rank = { auth: -1, limited: 0, stuck: 1, working: 2, idle: 3, admin: 4, unknown: 5, off: 6 };
     return [...agents].sort((a, b) => (a.role === 'admin' ? -1 : b.role === 'admin' ? 1 :
       (rank[a.state] ?? 5) - (rank[b.state] ?? 5)) || a.name.localeCompare(b.name));
   }
@@ -45,9 +45,10 @@
   }
 
   function partitionAgents(agents, mode = 'urgency') {
-    const groups = { admins: [], working: [], free: [] };
+    const groups = { admins: [], attention: [], working: [], free: [] };
     for (const agent of agents) {
       if (agent.role === 'admin') groups.admins.push(agent);
+      else if (agent.state === 'auth') groups.attention.push(agent);
       else if (agent.state === 'working') groups.working.push(agent);
       else groups.free.push(agent);
     }

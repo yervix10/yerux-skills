@@ -219,11 +219,13 @@ pick_worker() { local t; for t in $(awk -F= '{print $2}' "$B/names.conf" 2>/dev/
 reassign() { local t="$1" f; mkdir -p "$B/inbox/$t"; f="$B/inbox/$t/$(date +%Y%m%dT%H%M%S).$$-de-$from.msg"
   printf 'From: %s\nTo: %s\nDate: %s\nCwd: %s\n\n[reassigned from %s: it hit a usage limit]\n%s\n' "$from" "$t" "$(date '+%F %T')" "$orig_cwd" "$name" "$body" > "$f.tmp" && mv "$f.tmp" "$f"; }
 REASSIGN="${BRIDGE_REASSIGN:-$(sed -n 's/^REASSIGN=//p' "$B/config" 2>/dev/null | head -1)}"; REASSIGN="${REASSIGN:-0}"
-# classify <rc> <text> -> ok | limit | api | timeout | error
+# classify <rc> <text> -> ok | limit | auth | api | timeout | error  (auth = the account is not signed in or its session expired)
 classify() { local rc="$1" low; low="$(printf '%s' "$2" | tr 'A-Z' 'a-z')"
   [ "$rc" = 124 ] && { echo timeout; return; }
-  case "$low" in *"not scoped to a workspace"*) echo api; return;; *"access denied by policy"*|*"authentication required"*) echo api; return;; esac
+  case "$low" in *"authentication required"*) echo auth; return;; esac
+  case "$low" in *"not scoped to a workspace"*) echo api; return;; *"access denied by policy"*) echo api; return;; esac
   if [ "$rc" != 0 ]; then
+    case "$low" in *"not logged in"*|*"please run /login"*|*"not signed in"*|*"please log in"*|*"login required"*|*"invalid api key"*|*"invalid x-api-key"*|*"token expired"*|*"session expired"*|*"expired token"*|*"credentials have expired"*|*"oauth token has expired"*|*"authentication_error"*|*"failed to authenticate"*|*"http 401"*|*"status 401"*|*"error 401"*|*"code 401"*|*" 401 "*|*unauthorized*) echo auth; return;; esac
     case "$low" in *"free-models-per-day"*|*"free usage limit reached"*|*"tokens per minute"*|*"you've hit your usage limit"*) echo limit; return;; esac
     case "$low" in *"usage limit"*|*"rate limit"*|*"rate_limit"*|*"limit reached"*|*"hit your limit"*|*quota*|*"too many requests"*|*"credit balance"*|*resource_exhausted*|*"resource exhausted"*|*"429"*|*"out of credits"*|*"quota exceeded"*|*"limit will reset"*|*"resets at"*|*"resets in"*) echo limit; return;;
       *overloaded*|*"api error"*|*"authentication"*|*"not signed in"*|*"not logged in"*|*"sign in"*|*"invalid api key"*|*"invalid x-api-key"*|*econnrefused*|*econnreset*|*"network error"*|*"503"*|*"529"*|*"502"*|*"401"*|*unauthorized*) echo api; return;; esac
@@ -422,11 +424,12 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
       log "limit hit: paused until $PAUSE_UNTIL"
       if [ "$REASSIGN" = 1 ] && other="$(pick_worker)" && [ -n "$other" ]; then reassign "$other"; res="$res
 Order reassigned to '$other' (idle); it will reply to you directly."; log "order reassigned to $other"; fi;;
+    auth) res="AUTH ERROR: the session of this account expired or was never signed in; the worker cannot run orders until you sign in again on that account (Claude: /login · Codex: codex login · others: their login command). Output: $res"; log "auth error: not signed in or session expired";;
     api) res="API ERROR: the provider or the account failed (code $rc). Output: $res";;
     timeout) res="TIMEOUT after ${TMO}s: $res";;
     error) res="ERROR (code $rc): $res";;
   esac
-  case "$verdict" in limit|api|error|timeout) notify_desktop "$verdict: ${res:0:120}";; esac
+  case "$verdict" in limit|auth|api|error|timeout) notify_desktop "$verdict: ${res:0:120}";; esac
   RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END; sw
   [ -n "$res" ] || res="(no output)"
   BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$from" "$res" >/dev/null

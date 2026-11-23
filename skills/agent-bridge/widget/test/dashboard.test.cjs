@@ -122,7 +122,7 @@ test('oculta métricas sin uso ni reinicio y conserva filas con solo reinicio', 
   assert.equal(highestUsage({ ...agent, context: 0, five_hour: usage, weekly: usage, monthly: usage }), 0);
 });
 
-test('separa admin fijo, trabajando y libres, y ordena urgencia dentro de los grupos', () => {
+test('separa admin fijo, sesión caída, trabajando y libres, y ordena urgencia dentro de los grupos', () => {
   const agents = [
     { name: 'idle', role: 'worker', state: 'idle' },
     { name: 'working-b', role: 'worker', state: 'working' },
@@ -131,10 +131,11 @@ test('separa admin fijo, trabajando y libres, y ordena urgencia dentro de los gr
     { name: 'limited', role: 'worker', state: 'limited' },
     { name: 'working-a', role: 'worker', state: 'working' },
     { name: 'off', role: 'worker', state: 'off' },
+    { name: 'no-login', role: 'worker', state: 'auth' },
   ];
   const groups = partitionAgents(agents);
   assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, values]) => [key, values.map(({ name }) => name)])), {
-    admins: ['admin'], working: ['working-a', 'working-b'], free: ['limited', 'stuck', 'idle', 'off'],
+    admins: ['admin'], attention: ['no-login'], working: ['working-a', 'working-b'], free: ['limited', 'stuck', 'idle', 'off'],
   });
 });
 

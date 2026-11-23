@@ -77,7 +77,7 @@ case "$1" in
           IFS=$'\t' read -r model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan < <("$D/bridge-usage" "$n" 2>/dev/null)
           for v in model proj br ctx h5 wk age eff h5r wkr mo mor credits ctxwin plan_used plan_total plan; do [ "${!v}" = - ] && printf -v "$v" ''; done
           line="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"; role=worker; [ "$n" = "$adm" ] && role=admin
-          case "$line" in "") state=${role/worker/off}; [ "$role" = admin ] && state=admin;; "-"*) state=off;; *LIMITED*) state=limited;; *"NO HEARTBEAT"*) state=stuck;; *WORKING*) state=working;; *idle*) state=idle;; *) state=unknown;; esac
+          case "$line" in "") state=${role/worker/off}; [ "$role" = admin ] && state=admin;; "-"*) state=off;; *LIMITED*) state=limited;; *"NO HEARTBEAT"*) state=stuck;; *WORKING*) state=working;; *"last order: auth"*) state=auth;; *idle*) state=idle;; *) state=unknown;; esac
           [ "$role" = admin ] && state=admin
           want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
           tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"

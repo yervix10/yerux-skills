@@ -30,6 +30,7 @@ const connection = document.querySelector('#connection');
 const announcement = document.querySelector('#announcement');
 const list = document.querySelector('#agents');
 const adminList = document.querySelector('#admins');
+const attentionList = document.querySelector('#attention');
 const workingGroup = { section: document.querySelector('#group-working'), button: document.querySelector('#toggle-working'), count: document.querySelector('#count-working'), list: document.querySelector('#list-working') };
 const freeGroup = { section: document.querySelector('#group-free'), button: document.querySelector('#toggle-free'), count: document.querySelector('#count-free'), list: document.querySelector('#list-free') };
 const detailView = document.querySelector('#detail-view');
@@ -43,7 +44,7 @@ const toolDetailsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-det
 
 const states = {
   admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
-  stuck: 'Atascado', off: 'Apagado', unknown: 'Desconocido',
+  stuck: 'Atascado', off: 'Apagado', unknown: 'Desconocido', auth: 'Sesión caída',
 };
 const scale = { green: 'normal', amber: 'alto', red: 'crítico' };
 const timeFormat = new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -157,7 +158,10 @@ function agentCard(agent) {
     contextLine.title = [agent.project, agent.branch].filter(Boolean).join(' / ');
     card.append(contextLine);
   }
-  if (agent.detail && agent.detail !== '-') {
+  if (agent.state === 'auth') {
+    const note = element('p', 'auth-note', 'Su sesión expiró o nunca se inició. Vuelve a iniciar sesión en esa cuenta (Claude: /login · Codex: codex login) y reenvía la orden.');
+    card.append(note);
+  } else if (agent.detail && agent.detail !== '-') {
     const detail = element('p', 'detail truncate', agent.detail);
     detail.title = agent.detail;
     card.append(detail);
@@ -225,7 +229,7 @@ function render() {
   const agents = sortAgents(data?.agents ?? [], settings.sort);
   const working = agents.filter(({ state }) => state === 'working').length;
   const idle = agents.filter(({ state }) => state === 'idle').length;
-  const alerts = agents.filter(({ state }) => ['limited', 'stuck', 'unknown'].includes(state)).length;
+  const alerts = agents.filter(({ state }) => ['limited', 'stuck', 'unknown', 'auth'].includes(state)).length;
   const counts = data ? `${working} trabajando · ${idle} libres · ${alerts} alertas` : 'Conectando…';
   summary.textContent = collapsed && disconnected ? 'Sin conexión con el bridge' : counts;
   summary.title = collapsed && disconnected && data ? counts : '';
@@ -277,6 +281,7 @@ function render() {
     }
   }
   renderCards(adminList, groups.admins);
+  renderCards(attentionList, groups.attention);
   const renderGroup = (key, group, values) => {
     const isOpen = settings.groupOpen[key];
     group.section.hidden = values.length === 0;
