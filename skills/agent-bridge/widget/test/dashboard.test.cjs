@@ -16,7 +16,11 @@ test('define acento violeta admin coherente y variantes de vista compacta/detall
   assert.doesNotMatch(css, /border-left/);
   assert.match(css, /\.compact\.agent-admin \.identity-labels \{ display: flex; \}/);
   assert.match(css, /--admin-accent: #5b3db5/);
-  assert.doesNotMatch(css, /prefers-color-scheme: dark|color-scheme: dark/, 'light theme only');
+  assert.match(css, /\nheader \{[^}]*app-region: drag/, 'the whole header drags the window');
+  assert.match(css, /header button \{[^}]*app-region: no-drag/, 'header buttons stay clickable');
+  assert.doesNotMatch(css, /prefers-color-scheme/, 'dark mode is never automatic (it follows the system)');
+  assert.match(css, /:root\[data-theme="dark"\]/, 'dark mode is an opt-in theme');
+  assert.match(css, /^:root \{\s*color-scheme: light;/m, 'light is the default');
   assert.match(css, /\.detail-admin \.feed-admin[\s\S]*?--admin-accent/);
   assert.match(renderer, /agent\.role === 'admin' \? ' agent-admin'/);
   assert.match(renderer, /detailView\.classList\.toggle\('detail-admin', agent\.role === 'admin'\)/);

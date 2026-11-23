@@ -2,6 +2,12 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.5
+
+- Widget: optional dark mode (header button, remembered; light stays the default and nothing follows the system).
+- Widget: the header summary wraps instead of being cut off at narrow widths; "Agent Bridge" no longer splits.
+- Widget: the whole header drags the window, not only the grip dots.
+
 ## 1.6.4
 
 - Fix: `agent`, `admin` and the other scripts now follow symlink chains (`~/.local/bin/agent` -> `~/.claude-bridge/bin/agent` -> app) to find their siblings; before, `bridge-whoami` was not found and `agent up all` could start a runner for the admin session itself.

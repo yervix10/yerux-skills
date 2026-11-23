@@ -8,6 +8,15 @@ const verticalBorder = parseFloat(panelStyle.borderTopWidth) + parseFloat(panelS
 const summary = document.querySelector('#summary');
 const updated = document.querySelector('#updated');
 const toggle = document.querySelector('#toggle');
+const themeButton = document.querySelector('#theme');
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeButton.firstElementChild.textContent = theme === 'dark' ? '☀' : '☾';
+  const next = theme === 'dark' ? 'claro' : 'oscuro';
+  themeButton.title = `Modo ${next}`; themeButton.setAttribute('aria-label', `Cambiar a modo ${next}`);
+}
+applyTheme(localStorage.getItem('bridge-theme') === 'dark' ? 'dark' : 'light');
+themeButton.addEventListener('click', () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('bridge-theme', t); applyTheme(t); });
 document.querySelector('#close').addEventListener('click', () => window.bridgeWidget.close());
 const updateBanner = document.querySelector('#update-banner');
 let updateInfo = { available: false };
@@ -233,7 +242,8 @@ function render() {
   const idle = agents.filter(({ state }) => state === 'idle').length;
   const alerts = agents.filter(({ state }) => ['limited', 'stuck', 'unknown', 'auth'].includes(state)).length;
   const counts = data ? `${working} trabajando · ${idle} libres · ${alerts} alertas` : 'Conectando…';
-  summary.textContent = collapsed && disconnected ? 'Sin conexión con el bridge' : counts;
+  if (collapsed && disconnected) summary.textContent = 'Sin conexión con el bridge';
+  else { summary.replaceChildren(); String(counts).split(' · ').forEach((part, i) => { if (i) summary.append(' · '); const chunk = document.createElement('span'); chunk.className = 'summary-part'; chunk.textContent = part; summary.append(chunk); }); }
   summary.title = collapsed && disconnected && data ? counts : '';
   summary.classList.toggle('offline', collapsed && disconnected);
   connection.hidden = !disconnected;
