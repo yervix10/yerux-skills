@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.7
+
+- Fix: a worker whose account is signed out stays "Sesión caída" across runner restarts (marker `runs/<name>.auth`, cleared when an order succeeds); before, restarting the runner made it look "Libre" again.
+- Widget: removed the grip dots (the whole header still drags the window) and moved the version next to the title.
+
 ## 1.6.6
 
 - Fix: the widget rejected the whole dashboard (showing "Sin conexión con el bridge") as soon as one worker was in the `auth` state; its validator now accepts `auth`, and a test checks every state `agent` can emit against it.

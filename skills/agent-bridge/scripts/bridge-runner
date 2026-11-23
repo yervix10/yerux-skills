@@ -44,6 +44,7 @@ log "bypass=$BYPASS"
 # ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
 ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"
 S_STATUS=idle; S_SINCE=$(date +%s); S_ORDER=""; S_END=""; S_RC=""; S_KIND=""; LASTBEAT=0; CHILD=""
+if [ -s "$B/runs/$name.auth" ]; then S_END="$(head -1 "$B/runs/$name.auth")"; S_RC=1; S_KIND=auth; fi   # restored after a restart
 COMPACT_AT="${BRIDGE_COMPACT_AT:-$(sed -n 's/^COMPACT_AT=//p' "$B/config" 2>/dev/null | head -1)}"; COMPACT_AT="${COMPACT_AT:-40}"   # % of context that triggers a compaction before the next order (0 = off)
 [[ "$COMPACT_AT" =~ ^[0-9]+$ ]] && [ "$COMPACT_AT" -le 100 ] || COMPACT_AT=40
 CLAUDE_COMPACT_ENABLED=true; [ "$COMPACT_AT" -gt 0 ] || CLAUDE_COMPACT_ENABLED=false
@@ -435,7 +436,10 @@ Order reassigned to '$other' (idle); it will reply to you directly."; log "order
     error) res="ERROR (code $rc): $res";;
   esac
   case "$verdict" in limit|auth|api|error|timeout) notify_desktop "$verdict: ${res:0:120}";; esac
-  RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END; sw
+  RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END
+  # a signed-out account stays "Sesión caída" across runner restarts until an order succeeds again
+  mkdir -p "$B/runs"; if [ "$verdict" = auth ]; then echo "$S_END" > "$B/runs/$name.auth"; elif [ "$verdict" = ok ]; then rm -f "$B/runs/$name.auth"; fi
+  sw
   [ -n "$res" ] || res="(no output)"
   BRIDGE_NAME="$name" "$AB_DIR/bridge-send" "$from" "$res" >/dev/null
   echo "- $(date '+%F %T') from $from [$cwd] rc=$rc: $(printf '%s' "$body" | head -c 100 | tr '\n' ' ')" >> "$NOTES"
