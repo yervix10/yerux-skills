@@ -18,13 +18,16 @@ ab_options_menu() {
   ms_run; OPT_ON=("${MS_ON[@]}"); [ "$MS_BACK" = 1 ] && return 0; OPT_SKILL="${MS_ON[0]}"; OPT_HOOKS="${MS_ON[1]}"; OPT_BYPASS="${MS_ON[2]}"; OPT_PATH="${MS_ON[3]}"
 }
 
+# set_conf KEY VALUE: changes (or appends) one line of ~/.claude-bridge/config and keeps every other option the user set
+set_conf() { local f="$BR/config" k="$1" v="$2"; touch "$f"
+  if grep -q "^$k=" "$f" 2>/dev/null; then sed "s|^$k=.*|$k=$v|" "$f" > "$f.tmp" && mv "$f.tmp" "$f"; else printf '%s=%s\n' "$k" "$v" >> "$f"; fi; }
 do_scripts() {
   mkdir -p "$BR/bin" "$BR/inbox" "$BR/read" && chmod 700 "$BR"
   [ ! -f "$BR/admin" ] || chmod 600 "$BR/admin"
   for live_file in "$BR"/logs/*.live; do [ ! -f "$live_file" ] || chmod 600 "$live_file"; done
   for s in "$SRC"/scripts/*; do chmod +x "$s"; ln -sfn "$s" "$BR/bin/$(basename "$s")"; done
   [ ! -f "$SRC/../../VERSION" ] || cp "$SRC/../../VERSION" "$BR/version"
-  printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; printf 'BYPASS=%s\n' "$OPT_BYPASS" > "$BR/config"; do_widget; }
+  printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; set_conf BYPASS "$OPT_BYPASS"; do_widget; }
 # Desktop widget (Electron): linked at ~/.claude-bridge/widget and installed with npm when Node >= 22.12 exists. BRIDGE_INSTALL_WIDGET=0 skips it.
 do_widget() { [ "${BRIDGE_INSTALL_WIDGET:-1}" = 1 ] && [ -d "$SRC/widget" ] || return 0
   mkdir -p "$BR" && ln -sfn "$SRC/widget" "$BR/widget"; chmod +x "$SRC/widget/bin/agent-bridge-widget" 2>/dev/null

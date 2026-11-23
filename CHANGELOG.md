@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.5.2
+
+- The installer no longer overwrites `~/.claude-bridge/config`: it changes only `BYPASS` and keeps the options you set (`WIDGET`, `ALERT`, `COMPACT_AT`, ...). Updating from the widget therefore keeps your settings.
+
 ## 1.5.1
 
 - New state **Sesión caída**: when a worker's order fails because the account is signed out or its session expired, the runner records `auth` (not a generic API error), `agent dashboard --json` reports `state: "auth"`, and the widget shows a clear notice on top.

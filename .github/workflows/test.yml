@@ -17,6 +17,7 @@ jobs:
           bash skills/agent-bridge/tests/bridge-security.test.sh
           bash skills/agent-bridge/tests/agent-update.test.sh
           bash skills/agent-bridge/tests/classify.test.sh
+          bash skills/agent-bridge/tests/config-keep.test.sh
           node --test skills/agent-bridge/widget/test/feed.test.cjs
   macos:
     runs-on: macos-latest
@@ -28,6 +29,7 @@ jobs:
           bash skills/agent-bridge/tests/bridge-security.test.sh
           bash skills/agent-bridge/tests/agent-update.test.sh
           bash skills/agent-bridge/tests/classify.test.sh
+          bash skills/agent-bridge/tests/config-keep.test.sh
           node --test skills/agent-bridge/widget/test/feed.test.cjs
   windows-syntax:
     runs-on: windows-latest
