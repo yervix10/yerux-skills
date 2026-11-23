@@ -28,6 +28,12 @@ On Windows pass the same options with `$env:AGENT_BRIDGE_ARGS='-Yes -Skills all'
 From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows).
 `--uninstall` removes agent-bridge and the extra skills the installer added; the mailbox `~/.claude-bridge` is kept.
 
+## Mentioning agents
+
+In a Claude Code session, address a worker by name: `@agent-claude-2 run the tests of project X`. The installer creates a small
+subagent for every worker (`~/.claude*/agents/<worker>.md`) that only forwards your task with `agent <worker> "..."`.
+Type `@agent-<name>` by hand if the typeahead does not list it. Re-run the installer (or update) after adding or renaming an agent.
+
 ## Updating
 
 Releases are git tags named `vX.Y.Z`. The installed version is stored in `~/.claude-bridge/version`.

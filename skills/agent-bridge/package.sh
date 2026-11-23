@@ -55,6 +55,38 @@ wrap_statusline() { local f="$1" n="$2" cur mine="$BR/bin/bridge-statusline"; mk
 unwrap_statusline() { local f="$1" n="$2" orig; [ -f "$BR/statusline/$n.orig" ] || return 0; orig="$(cat "$BR/statusline/$n.orig")"
   if [ -n "$orig" ]; then jq --arg c "$orig" '.statusLine = {type:"command", command:$c}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; else jq 'del(.statusLine)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; fi
   rm -f "$BR/statusline/$n.orig"; }
+# Mentions: one tiny subagent per worker in every Claude account (~/.claude*/agents/<worker>.md) so "@" autocompletes the
+# team ("@agent-claude-2 do X"). Files carry a marker; only marked files are ever rewritten or removed.
+MENTION_MARK="<!-- agent-bridge:mention -->"
+mentions_sync() { local d="$1" me="$2" w kind f keep=" "
+  [ "$DRY" = 1 ] && return 0; mkdir -p "$d/agents"
+  while IFS='=' read -r _ w; do [ -n "$w" ] || continue; [ "$w" = "$me" ] && continue; case "$w" in *[!A-Za-z0-9_-]*) continue;; esac
+    f="$d/agents/$w.md"; keep="$keep$w "
+    if [ -f "$f" ] && ! grep -qF "$MENTION_MARK" "$f"; then continue; fi  # a file of the user's own: never touched
+    cat > "$f" <<EOM
+---
+name: $w
+description: Teammate "$w" of the agent-bridge team. Use it when the user mentions @$w or asks to give, send or delegate a task to $w. It only forwards the task to that worker; it does not do the work itself.
+tools: Bash
+model: haiku
+---
+$MENTION_MARK
+You forward one task to the worker "$w" through agent-bridge and nothing else.
+
+1. Take the task exactly as the user wrote it (keep paths and details; do not shorten it).
+2. Run: \`~/.claude-bridge/bin/agent $w "<the task>"\` (quote it safely).
+3. If the command prints a WARNING or NOTE (worker limited, low capacity), repeat it verbatim.
+4. Reply in one line: sent to $w, plus any warning. If the command is refused (this session is not the admin), say so and suggest /admin.
+
+Never do the task yourself and never wait for the worker: its report arrives through \`agent listen\`.
+EOM
+  done <<EOM2
+$MAP
+EOM2
+  for f in "$d"/agents/*.md; do [ -f "$f" ] || continue; grep -qF "$MENTION_MARK" "$f" || continue
+    w="$(basename "$f" .md)"; case "$keep" in *" $w "*) ;; *) rm -f "$f";; esac; done; return 0; }
+mentions_remove() { local d="$1" f; [ "$DRY" = 1 ] && return 0
+  for f in "$d"/agents/*.md; do [ -f "$f" ] && grep -qF "$MENTION_MARK" "$f" && rm -f "$f"; done; return 0; }
 in_claude_ab() { local d="$1" n; n="$(get_name "$d")"
   [ $DRY = 1 ] && { :; return 0; }
   mkdir -p "$d/commands" "$d/skills/agent-bridge" "$BR/inbox/$n"
@@ -62,7 +94,7 @@ in_claude_ab() { local d="$1" n; n="$(get_name "$d")"
   jq --arg n "$n" '.env = ((.env // {}) + {BRIDGE_NAME:$n}) | del(.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"
   [ $OPT_HOOKS = 1 ] && add_hooks "$d/settings.json" "$HOOK"
   [ "${OPT_STATUSLINE:-0}" = 1 ] && wrap_statusline "$d/settings.json" "$n"
-  if [ $OPT_SKILL = 1 ]; then cp "$SRC"/commands/*.md "$d/commands/"; cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"; fi
+  if [ $OPT_SKILL = 1 ]; then cp "$SRC"/commands/*.md "$d/commands/"; cp "$SRC/SKILL.md" "$d/skills/agent-bridge/SKILL.md"; mentions_sync "$d" "$n"; fi
   return 0; }
 in_codex_ab() { local d="$1" n f; n="$(get_name "$d")"
   [ $DRY = 1 ] && { :; return 0; }
@@ -124,7 +156,7 @@ cursor_agent_clash() { local a r; a="$(command -v agent 2>/dev/null)" || return 
 ab_un_claude() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/settings.json"; [ -f "$d/settings.json" ] && unwrap_statusline "$d/settings.json" "$(get_name "$d")"
   [ -f "$d/settings.json" ] && { jq 'del(.env.BRIDGE_NAME,.env.BRIDGE_COMMANDERS)' "$d/settings.json" > "$d/s.tmp" && mv "$d/s.tmp" "$d/settings.json"; }
-  rm -rf "$d/skills/agent-bridge" "$d/commands/admin.md" "$d/commands/agent.md" "$d/commands/dashboard.md"; return 0; }
+  mentions_remove "$d"; rm -rf "$d/skills/agent-bridge" "$d/commands/admin.md" "$d/commands/agent.md" "$d/commands/dashboard.md"; return 0; }
 ab_un_codex() { local d="$1"; [ $DRY = 1 ] && return 0
   del_hooks "$d/hooks.json"; command -v python3 >/dev/null 2>&1 && python3 "$SRC/scripts/codex-trust-hooks" "$d" --prune >/dev/null 2>&1
   rm -rf "$d/skills/agent-bridge" "$d/prompts/admin.md" "$d/prompts/agent.md" "$d/prompts/dashboard.md"; strip_block "$d/AGENTS.md"; return 0; }

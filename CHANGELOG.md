@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.0
+
+- **Mention your agents.** The installer writes one tiny subagent per worker in every Claude account (`~/.claude*/agents/<worker>.md`). Write `@agent-claude-2 do X` (or just "tell claude-2 to do X") and it forwards the task with `agent claude-2 "..."`. Files carry a marker: your own agent files are never overwritten, stale ones are removed, and `--uninstall` removes only ours.
+
 ## 1.5.2
 
 - The installer no longer overwrites `~/.claude-bridge/config`: it changes only `BYPASS` and keeps the options you set (`WIDGET`, `ALERT`, `COMPACT_AT`, ...). Updating from the widget therefore keeps your settings.
