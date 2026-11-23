@@ -233,8 +233,13 @@ MS_ALL=0
 ms_allsync() { [ $MS_ALL = 1 ] || return 0; local i all=1 v
   if [ $MS_CUR = 0 ]; then v="${MS_ON[0]}"; i=1; while [ $i -lt $MS_N ]; do MS_ON[$i]=$v; i=$((i+1)); done
   else i=1; while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] || all=0; i=$((i+1)); done; MS_ON[0]=$all; fi; }
+# bash 3.2 (macOS) applies `read -s` to stdin, not to -u 3: switch the terminal off echo / line mode explicitly
+MS_STTY=""
+ms_raw_on() { [ -n "$MS_STTY" ] || trap 'ms_raw_off; ui_cursor_on' EXIT INT TERM; MS_STTY="$(stty -g <&3 2>/dev/null || true)"; stty -echo -icanon min 1 time 0 <&3 2>/dev/null || true; }
+ms_raw_off() { if [ -n "$MS_STTY" ]; then stty "$MS_STTY" <&3 2>/dev/null || stty sane <&3 2>/dev/null || true; else stty echo icanon <&3 2>/dev/null || true; fi; }
 ms_run() { local k rest first=1 i
   MS_CUR=0; MS_TOP=0; MS_EXTRA=0; MS_DRAWN=0; MS_BACK=0; ui_cursor_off
+  ms_raw_on
   # zsh/macOS terminals may leave the keypad in application mode (arrows arrive as ESC O A); force normal mode
   [ $UI_COLOR = 1 ] && printf '\033[?1l\033>' >&2
   while :; do
@@ -254,14 +259,14 @@ ms_run() { local k rest first=1 i
       *) [ -n "$MS_CB" ] && "$MS_CB" "$k";;
     esac
   done
-  ui_cursor_on; return 0; }
+  ms_raw_off; ui_cursor_on; return 0; }
 hint() { printf '  %s%s%s\n' "$DIM" "$1" "$RST"; }
 acc_refresh() { local i=0; while [ $i -lt $MS_N ]; do MS_L[$i]="$(get_name "${ACC_DIR[$i]}")"; MS_S[$i]="${ACC_KIND[$i]}   $(tilde "${ACC_DIR[$i]}")"; i=$((i+1)); done; }
 acc_cb() { case "$1" in
-  r) ui_cursor_on; printf '\n  %s%s%s new name for %s: ' "$CYN" "$S_ARROW" "$RST" "${MS_L[$MS_CUR]}"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; MS_EXTRA=2
+  r) ms_raw_off; ui_cursor_on; printf '\n  %s%s%s new name for %s: ' "$CYN" "$S_ARROW" "$RST" "${MS_L[$MS_CUR]}"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; ms_raw_on; MS_EXTRA=2
      case "$REPLY" in ""|*[!A-Za-z0-9_-]*) ;; *) if printf '%s\n' "$MAP" | awk -F= -v k="${ACC_DIR[$MS_CUR]}" -v v="$REPLY" '$1!=k && $2==v{f=1} END{exit !f}'; then :; else set_name "${ACC_DIR[$MS_CUR]}" "$REPLY"; acc_refresh; fi;; esac;;
-  +) ui_cursor_on; printf '\n  %s%s%s type (claude/codex/kiro/agy/cursor/copilot/opencode): ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r kind <&3 || kind=""
-     printf '  %s%s%s folder: ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; MS_EXTRA=3
+  +) ms_raw_off; ui_cursor_on; printf '\n  %s%s%s type (claude/codex/kiro/agy/cursor/copilot/opencode): ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r kind <&3 || kind=""
+     printf '  %s%s%s folder: ' "$CYN" "$S_ARROW" "$RST"; IFS= read -r REPLY <&3 || REPLY=""; ui_cursor_off; ms_raw_on; MS_EXTRA=3
      local p; p="$(norm "$REPLY")" || p=""
      [ "$kind" = agy ] && kind=antigravity
      if { [ "$kind" = claude ] || [ "$kind" = codex ] || [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = copilot ] || [ "$kind" = opencode ]; } && [ -n "$p" ] && [ -d "$p" ]; then
