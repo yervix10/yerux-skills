@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.6
+
+- Fix: the widget rejected the whole dashboard (showing "Sin conexión con el bridge") as soon as one worker was in the `auth` state; its validator now accepts `auth`, and a test checks every state `agent` can emit against it.
+- Fix: `agent dashboard` no longer prints bash arithmetic errors when a usage value is `-`.
+
 ## 1.6.5
 
 - Widget: optional dark mode (header button, remembered; light stays the default and nothing follows the system).

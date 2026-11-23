@@ -156,3 +156,13 @@ test('conserva abierto/cerrado de los acordeones en los ajustes JSON', () => {
   const saved = JSON.parse(JSON.stringify({ groupOpen: { working: false, free: true } }));
   assert.deepEqual(normalizeSettings(saved).groupOpen, { working: false, free: true });
 });
+
+test('el widget acepta todos los estados que emite agent dashboard (p. ej. auth)', () => {
+  const fs = require('node:fs'); const path = require('node:path');
+  const script = fs.readFileSync(path.join(__dirname, '../../scripts/agent'), 'utf8');
+  const emitted = [...new Set([...script.matchAll(/state=([a-z]+)/g)].map((m) => m[1]).filter(Boolean))];
+  assert.ok(emitted.includes('auth'), 'el estado auth existe en agent');
+  for (const state of emitted) {
+    assert.doesNotThrow(() => parseDashboard(JSON.stringify({ time: 1, agents: [{ ...agent, state }] })), `estado ${state}`);
+  }
+});
