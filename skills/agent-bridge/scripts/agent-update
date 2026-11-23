@@ -8,11 +8,30 @@ B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; REPO="${AGENT_BRIDGE_REPO:-yervix10/yer
 CHECK=0; JSON=0; YES=0
 for a in "$@"; do case "$a" in --check) CHECK=1;; --json) JSON=1;; --yes|-y) YES=1;; -h|--help) sed -n 2,6p "$0"; exit 0;; *) echo "unknown option: $a" >&2; exit 2;; esac; done
 installed="$(tr -d '[:space:]v' < "$B/version" 2>/dev/null || true)"; [ -n "$installed" ] || installed="0.0.0"
-tags_json() { if [ -n "${AGENT_BRIDGE_TAGS_FILE:-}" ]; then cat "$AGENT_BRIDGE_TAGS_FILE"
-  else command -v curl >/dev/null || { echo "missing: curl" >&2; return 1; }
-    curl -fsSL --max-time 15 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/tags?per_page=100"; fi; }
+# Fetch the tag list with a conditional request (ETag): a 304 costs no GitHub rate limit, so checking every minute is cheap.
+# After a 403/429 we stay quiet until X-RateLimit-Reset and keep serving the cached list. One cache shared by the widget, the CLI and listeners.
+tags_json() { if [ -n "${AGENT_BRIDGE_TAGS_FILE:-}" ]; then cat "$AGENT_BRIDGE_TAGS_FILE"; return; fi
+  command -v curl >/dev/null || { echo "missing: curl" >&2; return 1; }
+  local cache="$B/update.tags.json" now hdr body code etag="" reset; now="$(date +%s)"; mkdir -p "$B"
+  cached() { [ -s "$cache" ] && cat "$cache"; }
+  if [ -f "$B/update.backoff" ] && [ "$now" -lt "$(cat "$B/update.backoff" 2>/dev/null || echo 0)" ] 2>/dev/null; then cached; return; fi
+  [ -s "$cache" ] && [ -s "$B/update.etag" ] && etag="$(cat "$B/update.etag")"
+  hdr="$(mktemp)"; body="$(mktemp)"
+  code="$(curl -sS --max-time 15 -o "$body" -D "$hdr" -w '%{http_code}' -H 'Accept: application/vnd.github+json' ${etag:+-H "If-None-Match: $etag"} "https://api.github.com/repos/$REPO/tags?per_page=100" 2>/dev/null)" || code=000
+  case "$code" in
+    200) sed -n 's/^[Ee][Tt]ag: *//p' "$hdr" | tr -d '\r' > "$B/update.etag"; mv "$body" "$cache"; rm -f "$B/update.backoff"; cat "$cache";;
+    304) cached;;
+    403|429) reset="$(sed -n 's/^[Xx]-[Rr]ate[Ll]imit-[Rr]eset: *//p' "$hdr" | tr -d '\r\n')"; case "$reset" in ""|*[!0-9]*) reset=$((now + 900));; esac
+             echo "$reset" > "$B/update.backoff"; cached;;
+    *) cached;;
+  esac; local rc=$?; rm -f "$hdr" "$body" 2>/dev/null; return $rc; }
 latest_tag() { tags_json | grep -o '"name": *"v[0-9]\{1,4\}\.[0-9]\{1,4\}\.[0-9]\{1,4\}"' | sed 's/.*"\(v[^"]*\)"/\1/' | sort -V | tail -1; }
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; } # is $1 newer than $2
+if [ $CHECK = 1 ] && [ -z "${AGENT_BRIDGE_TAGS_FILE:-}" ] && [ -f "$B/update.json" ]; then
+  _ts="$(sed -n 's/.*"checked":\([0-9]*\).*/\1/p' "$B/update.json")"; _in="$(sed -n 's/.*"installed":"\([^"]*\)".*/\1/p' "$B/update.json")"
+  if [ -n "$_ts" ] && [ "$_in" = "$installed" ] && [ $(( $(date +%s) - _ts )) -lt 45 ]; then
+    if [ $JSON = 1 ]; then cat "$B/update.json"; else echo "checked moments ago; see $B/update.json"; fi; exit 0; fi
+fi
 tag="$(latest_tag || true)"; latest="${tag#v}"
 available=0; [ -n "$latest" ] && newer "$latest" "$installed" && available=1
 mkdir -p "$B"; printf '{"installed":"%s","latest":"%s","available":%s,"checked":%s}\n' "$installed" "${latest:-}" "$([ $available = 1 ] && echo true || echo false)" "$(date +%s)" > "$B/update.json.tmp" && mv "$B/update.json.tmp" "$B/update.json"

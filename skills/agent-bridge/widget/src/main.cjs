@@ -233,6 +233,12 @@ function bridgeAgentCommand() {
   const root = path.resolve(process.env.BRIDGE_DIR || path.join(os.homedir(), '.claude-bridge'));
   return path.join(root, 'bin', 'agent');
 }
+// every minute while the widget is on screen, every 5 min when hidden/minimized, +-10% jitter so installs don't hit GitHub together.
+// `agent update --check` shares one ETag cache (a 304 is free) and backs off by itself when GitHub rate-limits.
+function nextUpdateDelay() {
+  const visible = window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
+  return Math.round((visible ? 60_000 : 300_000) * (0.9 + Math.random() * 0.2));
+}
 async function checkUpdate() {
   if (quitting || process.platform === 'win32') return;
   clearTimeout(updateTimer);
@@ -242,7 +248,7 @@ async function checkUpdate() {
     updateState = { available: info.available === true, latest: String(info.latest || ''), installed: String(info.installed || '') };
     if (window && !window.isDestroyed() && !window.webContents.isLoadingMainFrame()) window.webContents.send('update:state', updateState);
   } catch (error) { console.error('update check falló:', error && error.message); }
-  if (!quitting) { updateTimer = setTimeout(checkUpdate, 15 * 60 * 1000); updateTimer.unref?.(); }
+  if (!quitting) { updateTimer = setTimeout(checkUpdate, nextUpdateDelay()); updateTimer.unref?.(); }
 }
 
 async function poll(force = false) {

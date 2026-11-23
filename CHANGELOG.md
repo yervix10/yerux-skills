@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.8
+
+- Faster update notices: the widget checks every 60 s while visible (5 min when hidden or minimized, +-10% jitter) instead of every 15 min. Updates are still never applied without the user choosing to.
+- `agent update --check` uses a conditional request (ETag: a 304 costs no GitHub rate limit), backs off until X-RateLimit-Reset after a 403/429 while serving the cached tag list, and shares one cache across the widget, the CLI and listeners (a result under 45 s old is reused).
+
 ## 1.6.7
 
 - Fix: a worker whose account is signed out stays "Sesión caída" across runner restarts (marker `runs/<name>.auth`, cleared when an order succeeds); before, restarting the runner made it look "Libre" again.

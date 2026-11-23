@@ -18,6 +18,7 @@ jobs:
           bash skills/agent-bridge/tests/agent-update.test.sh
           bash skills/agent-bridge/tests/classify.test.sh
           bash skills/agent-bridge/tests/symlink-path.test.sh
+          bash skills/agent-bridge/tests/update-etag.test.sh
           bash skills/agent-bridge/tests/auth-persist.test.sh
           bash skills/agent-bridge/tests/config-keep.test.sh
           bash skills/agent-bridge/tests/mentions.test.sh
@@ -33,6 +34,7 @@ jobs:
           bash skills/agent-bridge/tests/agent-update.test.sh
           bash skills/agent-bridge/tests/classify.test.sh
           bash skills/agent-bridge/tests/symlink-path.test.sh
+          bash skills/agent-bridge/tests/update-etag.test.sh
           bash skills/agent-bridge/tests/auth-persist.test.sh
           bash skills/agent-bridge/tests/config-keep.test.sh
           bash skills/agent-bridge/tests/mentions.test.sh
