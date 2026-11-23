@@ -235,6 +235,8 @@ ms_allsync() { [ $MS_ALL = 1 ] || return 0; local i all=1 v
   else i=1; while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] || all=0; i=$((i+1)); done; MS_ON[0]=$all; fi; }
 ms_run() { local k rest first=1 i
   MS_CUR=0; MS_TOP=0; MS_EXTRA=0; MS_DRAWN=0; MS_BACK=0; ui_cursor_off
+  # zsh/macOS terminals may leave the keypad in application mode (arrows arrive as ESC O A); force normal mode
+  [ $UI_COLOR = 1 ] && printf '\033[?1l\033>' >&2
   while :; do
     if [ $first = 0 ] && [ $((MS_DRAWN + MS_EXTRA)) -gt 0 ]; then printf '\033[%dA\033[J' $((MS_DRAWN + MS_EXTRA)); fi
     first=0; MS_EXTRA=0; ms_draw
@@ -243,7 +245,7 @@ ms_run() { local k rest first=1 i
       "") break;;
       " ") [ $MS_N -gt 0 ] && { [ "${MS_ON[$MS_CUR]}" = 1 ] && MS_ON[$MS_CUR]=0 || MS_ON[$MS_CUR]=1; ms_allsync; };;
       $'\033') IFS= read -rsn2 -t 1 -u 3 rest || rest=""
-        case "$rest" in "[A") [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));; "[B") [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));; esac;;
+        case "$rest" in "[A"|"OA") [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));; "[B"|"OB") [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));; esac;;
       k|K) [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));;
       j|J) [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));;
       b|B) if [ $MS_CAN_BACK = 1 ]; then MS_BACK=1; break; fi;;
@@ -312,7 +314,7 @@ EOF2
     1) # --- packages (select) ---
       MS_L=("all" "${PK_L[@]}"); MS_S=("select every package" "${PK_S[@]}"); MS_ON=(0 "${PK_ON[@]}"); MS_F=(0 1); MS_N=$((${#PK_L[@]}+1)); MS_ALL=1
       i=1; MS_ON[0]=1; while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] || MS_ON[0]=0; i=$((i+1)); done
-      menu_screen 1 "↑↓ move" "space select" "a all" "n none" "enter continue"
+      menu_screen 1 "↑↓/jk move" "space select" "a all" "n none" "enter continue"
       MS_CAN_BACK=0; ms_run; MS_ALL=0
       PK_ON=("${MS_ON[@]:1}"); PKG_AB="${MS_ON[1]}"; SEL_SKILLS=""; i=2
       while [ $i -lt $MS_N ]; do [ "${MS_ON[$i]}" = 1 ] && SEL_SKILLS="$SEL_SKILLS ${MS_L[$i]}"; i=$((i+1)); done
@@ -336,7 +338,7 @@ ${ACC_DIR[$i]}";; esac; i=$((i+1)); done
       [ $MS_BACK = 1 ] && { step=1; continue; }
       if [ $MS_EDIT = 1 ]; then
         MS_L=(); MS_S=(); MS_ON=("${ACC_ONS[@]}"); MS_F=(); MS_N=$ACC_N; acc_refresh
-        menu_screen 2 "↑↓ move" "space select" "r rename" "+ add folder" "enter done"
+        menu_screen 2 "↑↓/jk move" "space select" "r rename" "+ add folder" "enter done"
         MS_CAN_BACK=0; MS_CB=acc_cb; ms_run; MS_CB=""; ACC_N=$MS_N; ACC_ONS=("${MS_ON[@]}"); continue; fi
       if [ "$PKG_AB" = 1 ]; then step=3; else step=4; fi;;
     3) # --- agent-bridge options (info) ---
