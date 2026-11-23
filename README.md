@@ -41,7 +41,7 @@ Releases are git tags named `vX.Y.Z`. The installed version is stored in `~/.cla
     agent update --check     is there a newer tag? (changes nothing)
     agent update --yes       download that tag and run the installer on it (asks without --yes)
 
-The desktop widget checks once an hour and shows an **Actualización disponible** banner; one click (after a confirmation)
+The desktop widget checks when it starts and every 15 minutes (or on demand: tray menu, **Buscar actualizaciones**) and shows an **Actualización disponible** banner; one click (after a confirmation)
 runs `agent update --yes` and restarts the widget. Nothing is installed automatically.
 
 ## Repository layout

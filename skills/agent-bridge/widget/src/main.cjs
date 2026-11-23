@@ -152,6 +152,7 @@ function updateTray() {
     { label: 'Opacidad', submenu: [80, 90, 100].map((value) => ({ label: `${value}%`, type: 'radio', checked: settings.opacity === value, click: () => { settings.opacity = value; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } })) },
     { label: 'Tamaño de letra', submenu: [11, 12, 14].map((value) => ({ label: `${value}px`, type: 'radio', checked: settings.fontSize === value, click: () => { settings.fontSize = value; saveSettings(); window.webContents.send('dashboard:settings', settings); updateTray(); } })) },
     { type: 'separator' },
+    { label: 'Buscar actualizaciones', click: () => checkUpdate() },
     { label: 'Salir', click: () => app.quit() },
   ]));
 }
@@ -227,19 +228,21 @@ function runAdminAction(agent, args) {
 
 // Update check: `agent update --check --json` hourly; the banner offers `agent update --yes` on click.
 let updateState = { available: false };
+let updateTimer;
 function bridgeAgentCommand() {
   const root = path.resolve(process.env.BRIDGE_DIR || path.join(os.homedir(), '.claude-bridge'));
   return path.join(root, 'bin', 'agent');
 }
 async function checkUpdate() {
   if (quitting || process.platform === 'win32') return;
+  clearTimeout(updateTimer);
   try {
     const { stdout } = await promisify(execFile)(bridgeAgentCommand(), ['update', '--check', '--json'], { encoding: 'utf8', timeout: 30_000, shell: false, windowsHide: true });
     const info = JSON.parse(stdout);
     updateState = { available: info.available === true, latest: String(info.latest || ''), installed: String(info.installed || '') };
     if (window && !window.isDestroyed() && !window.webContents.isLoadingMainFrame()) window.webContents.send('update:state', updateState);
   } catch (error) { console.error('update check falló:', error && error.message); }
-  if (!quitting) setTimeout(checkUpdate, 60 * 60 * 1000).unref?.();
+  if (!quitting) { updateTimer = setTimeout(checkUpdate, 15 * 60 * 1000); updateTimer.unref?.(); }
 }
 
 async function poll(force = false) {
