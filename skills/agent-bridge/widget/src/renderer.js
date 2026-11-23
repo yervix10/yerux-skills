@@ -16,6 +16,8 @@ function showUpdate(info) {
   updateBanner.hidden = !updateInfo.available;
   if (updateInfo.available) document.querySelector('#update-text').textContent = `Actualización disponible · v${updateInfo.latest}`;
 }
+let projectVersion = '';
+window.bridgeWidget.version().then((v) => { projectVersion = v ? `v${v}` : ''; if (projectVersion) updated.textContent = projectVersion; });
 window.bridgeWidget.updateCurrent().then(showUpdate);
 window.bridgeWidget.onUpdateState(showUpdate);
 document.querySelector('#update-apply').addEventListener('click', () => {
@@ -241,8 +243,8 @@ function render() {
   if (data) {
     const date = new Date(data.time * 1000);
     updated.dateTime = date.toISOString();
-    updated.textContent = timeFormat.format(date);
-    updated.title = `Última actualización: ${date.toLocaleString('es')}`;
+    updated.textContent = projectVersion || timeFormat.format(date);
+    updated.title = `${projectVersion ? `Agent Bridge ${projectVersion} · ` : ''}Última actualización: ${date.toLocaleString('es')}`;
     updated.setAttribute('aria-label', updated.title);
   }
   const scroll = content.scrollTop;

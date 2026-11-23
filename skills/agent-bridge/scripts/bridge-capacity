@@ -5,7 +5,8 @@
 #   --tier <name>  prints just the tier of one worker (used by `agent <worker> ...` to warn the admin)
 # Tier = from the tightest window: <=5% left skip, <=20% light, <=50% normal, else heavy. A weekly/monthly window being burnt faster
 # than time passes (used% > elapsed% + 15) drops one tier. Claude workers always get sonnet (never opus); only the effort changes with the tier.
-D="$(dirname "$0")"; B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"; admin="$(cat "$B/admin" 2>/dev/null)"
+AB_SELF="$0"; while [ -L "$AB_SELF" ]; do AB_L="$(readlink "$AB_SELF")"; case "$AB_L" in /*) AB_SELF="$AB_L";; *) AB_SELF="$(dirname "$AB_SELF")/$AB_L";; esac; done; AB_DIR="$(cd "$(dirname "$AB_SELF")" && pwd)"  # resolve symlinks: ~/.local/bin/agent -> ~/.claude-bridge/bin/agent -> app
+D="$AB_DIR"; B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"; admin="$(cat "$B/admin" 2>/dev/null)"
 now=$(date +%s); apply=0; only=""
 case "$1" in --apply) apply=1;; --tier) only="$2";; esac
 [ "$apply" = 1 ] && [ "$me" != "$admin" ] && { echo "only the admin can apply (you are $me)" >&2; exit 1; }

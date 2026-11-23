@@ -4,7 +4,8 @@
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-usage <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"; [ -n "$dir" ] || exit 1
 now=$(date +%s); model=""; cwd=""; ctx=""; h5=""; wk=""; at=""; eff=""; h5r=""; wkr=""; mo=""; mor=""; credits=""; ctxwin=""; plan_used=""; plan_total=""; plan=""
-kind="$("$(dirname "$0")/bridge-provider" "$dir" 2>/dev/null || true)"
+AB_SELF="$0"; while [ -L "$AB_SELF" ]; do AB_L="$(readlink "$AB_SELF")"; case "$AB_L" in /*) AB_SELF="$AB_L";; *) AB_SELF="$(dirname "$AB_SELF")/$AB_L";; esac; done; AB_DIR="$(cd "$(dirname "$AB_SELF")" && pwd)"  # resolve symlinks: ~/.local/bin/agent -> ~/.claude-bridge/bin/agent -> app
+kind="$("$AB_DIR/bridge-provider" "$dir" 2>/dev/null || true)"
 case "$kind" in
   codex)
     f="$(find "$dir/sessions" -name '*.jsonl' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1)"
@@ -102,7 +103,7 @@ case "$kind" in
       ctx="$(jq -r 'select(.payload.type=="session_metadata" and .payload.key=="contextUsage")|.payload.value.usagePercentage // empty' "$f" 2>/dev/null | tail -1 | awk '{printf "%d", $1+0.5}')"
       credits="$(jq -sr '[.[]|select(.payload.type=="usage_summary")|.payload.promptTurnSummaries[]?|select(.unit=="credit")|.usage|select(type=="number")]|add // empty' "$f" 2>/dev/null)"
     fi
-    quota="$("$(dirname "$0")/bridge-kiro-usage" "$name" "$B/usage" 2>/dev/null)"
+    quota="$("$AB_DIR/bridge-kiro-usage" "$name" "$B/usage" 2>/dev/null)"
     IFS=$'\t' read -r mo mor plan_used plan_total plan _ <<< "$quota";;
 esac
 if [ "$kind" = claude ]; then

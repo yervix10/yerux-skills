@@ -403,6 +403,7 @@ async function createWidget() {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || typeof value !== 'string' || value.length > 4000) return false;
     clipboard.writeText(value); return true;
   });
+  ipcMain.handle('version:get', (event) => { if (!fromWidget(event)) return ''; try { return fs.readFileSync(path.join(path.dirname(path.dirname(bridgeAgentCommand())), 'version'), 'utf8').trim(); } catch { return ''; } });
   ipcMain.handle('update:current', (event) => { if (fromWidget(event)) return updateState; });
   ipcMain.on('update:apply', (event) => {
     if (!fromWidget(event) || !updateState.available) return;

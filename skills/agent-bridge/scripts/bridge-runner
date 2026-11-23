@@ -4,10 +4,11 @@
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; name="${1:?usage: bridge-runner <name>}"
 dir="$(awk -F= -v n="$name" '$2==n{print $1; exit}' "$B/names.conf" 2>/dev/null)"
 [ -n "$dir" ] || { echo "unknown name: $name" >&2; exit 1; }
-kind="$("$(dirname "$0")/bridge-provider" "$dir")" || { echo "unknown type: $dir" >&2; exit 1; }
-AGY_HOME="$HOME"; [ "$kind" = antigravity ] && AGY_HOME="$("$(dirname "$0")/bridge-agy-home" "$dir")"
+AB_SELF="$0"; while [ -L "$AB_SELF" ]; do AB_L="$(readlink "$AB_SELF")"; case "$AB_L" in /*) AB_SELF="$AB_L";; *) AB_SELF="$(dirname "$AB_SELF")/$AB_L";; esac; done; AB_DIR="$(cd "$(dirname "$AB_SELF")" && pwd)"  # resolve symlinks: ~/.local/bin/agent -> ~/.claude-bridge/bin/agent -> app
+kind="$("$AB_DIR/bridge-provider" "$dir")" || { echo "unknown type: $dir" >&2; exit 1; }
+AGY_HOME="$HOME"; [ "$kind" = antigravity ] && AGY_HOME="$("$AB_DIR/bridge-agy-home" "$dir")"
 # Cursor: the account dir (.cursor) maps to the HOME that owns it. NEVER call a bare `agent` for Cursor: here `agent` is the bridge command.
-ACC_HOME="$HOME"; case "$kind" in cursor) ACC_HOME="$("$(dirname "$0")/bridge-account-home" "$dir")";; esac
+ACC_HOME="$HOME"; case "$kind" in cursor) ACC_HOME="$("$AB_DIR/bridge-account-home" "$dir")";; esac
 mkdir -p "$B/inbox/$name" "$B/read/$name" "$B/logs" "$B/sessions/$name" "$B/notes" "$B/runs"
 chmod 600 "$B/admin" 2>/dev/null || true
 for live_file in "$B"/logs/*.live; do [ -e "$live_file" ] && chmod 600 "$live_file"; done
@@ -75,7 +76,7 @@ notify_desktop() { [ "${BRIDGE_NOTIFY:-1}" = 0 ] && return 0
     local message; message="$(printf '%s' "$1" | tr '\r\n' '  ' | sed 's/\\/\\\\/g; s/"/\\"/g')"
     osascript -e "display notification \"$message\" with title \"agent-bridge: $name\"" >/dev/null 2>&1
   fi; return 0; }
-notify_admin() { notify_desktop "${1:0:140}"; local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
+notify_admin() { notify_desktop "${1:0:140}"; local a; a="$(cat "$B/admin" 2>/dev/null)"; [ -n "$a" ] && BRIDGE_NAME="$name" "$AB_DIR/bridge-send" "$a" "$1" >/dev/null 2>&1; return 0; }
 # supervise <pid>: waits for the order's process, keeps the heartbeat and warns the admin every $ALERT seconds (it never kills it)
 supervise() { local pid="$1" t0 n=0 el; t0=$(date +%s); CHILD=$pid
   while kill -0 "$pid" 2>/dev/null; do sleep 2; beat; el=$(( $(date +%s) - t0 ))
@@ -406,7 +407,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
     status="$(jq -r 'select(.type=="runFinished")|.data.status // empty' "$LIVE" 2>/dev/null | tail -1)"
     { [ -n "$status" ] && [ "$status" != success ]; } && [ "$rc" = 0 ] && rc=1
-    "$(dirname "$0")/bridge-kiro-response" "$LIVE" > "$tmp"
+    "$AB_DIR/bridge-kiro-response" "$LIVE" > "$tmp"
     [ -s "$tmp" ] || { cat "$LIVE.err"; tail -c 3000 "$LIVE"; } > "$tmp" 2>/dev/null
     id="$( (cd "$cwd" && kiro-cli chat --list-sessions --format json 2>/dev/null) | jq -r '[..|objects|select(.sessionId? and .updatedAt?)]|sort_by(.updatedAt)|last.sessionId // empty' 2>/dev/null)"
     [ -n "$id" ] || id="$(jq -r 'select(.type=="sessionUpdate")|.data.sessionId // empty' "$LIVE" 2>/dev/null | tail -1)"
@@ -436,7 +437,7 @@ Order reassigned to '$other' (idle); it will reply to you directly."; log "order
   case "$verdict" in limit|auth|api|error|timeout) notify_desktop "$verdict: ${res:0:120}";; esac
   RESET_AT=""; S_ACT=""; S_ACT_AT=""; S_STATUS=idle; S_ORDER=""; S_END=$(date +%s); S_RC=$rc; S_KIND=$verdict; S_SINCE=$S_END; sw
   [ -n "$res" ] || res="(no output)"
-  BRIDGE_NAME="$name" "$(dirname "$0")/bridge-send" "$from" "$res" >/dev/null
+  BRIDGE_NAME="$name" "$AB_DIR/bridge-send" "$from" "$res" >/dev/null
   echo "- $(date '+%F %T') from $from [$cwd] rc=$rc: $(printf '%s' "$body" | head -c 100 | tr '\n' ' ')" >> "$NOTES"
   log "replied to $from (rc=$rc)"
 done

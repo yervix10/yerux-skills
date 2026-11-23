@@ -30,4 +30,14 @@ curl -fsSL "https://raw.githubusercontent.com/$REPO/$tag/get.sh" | AGENT_BRIDGE_
 printf '%s\n' "$latest" > "$B/version"
 # restart the widget on the new code (no-op when it was not running)
 if [ -x "$B/bin/bridge-widget" ] && "$B/bin/bridge-widget" status 2>/dev/null | grep -qi activo; then "$B/bin/bridge-widget" stop >/dev/null 2>&1 || true; sleep 1; ( "$B/bin/bridge-widget" start --quiet & ) >/dev/null 2>&1; fi
+# running runners keep the OLD code in memory: restart the idle ones on the new version; busy ones are listed (restarting would kill their task)
+if [ -x "$B/bin/agent" ] && [ -d "$B/runs" ]; then
+  busy=""
+  for pf in "$B"/runs/*.pid; do [ -f "$pf" ] || continue; n="$(basename "$pf" .pid)"
+    kill -0 "$(cat "$pf" 2>/dev/null)" 2>/dev/null || continue
+    st="$(sed -n 's/^status=//p' "$B/runs/$n.state" 2>/dev/null | head -1)"
+    if [ "$st" = working ]; then busy="$busy $n"; else "$B/bin/agent" down "$n" >/dev/null 2>&1 || true; sleep 1; "$B/bin/agent" up "$n" >/dev/null 2>&1 && echo "restarted $n on the new version"; fi
+  done
+  [ -z "$busy" ] || echo "still on the old version (working now):$busy  -> when idle: agent down <name>; agent up <name>"
+fi
 echo "updated to $tag"

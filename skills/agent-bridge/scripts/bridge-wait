@@ -3,4 +3,5 @@
 B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="${BRIDGE_NAME:?BRIDGE_NAME not set}"
 mkdir -p "$B/inbox/$me"
 while ! compgen -G "$B/inbox/$me/*.msg" >/dev/null; do sleep 1; done
-sleep 0.3; exec "$(dirname "$0")/bridge-hook" --text
+AB_SELF="$0"; while [ -L "$AB_SELF" ]; do AB_L="$(readlink "$AB_SELF")"; case "$AB_L" in /*) AB_SELF="$AB_L";; *) AB_SELF="$(dirname "$AB_SELF")/$AB_L";; esac; done; AB_DIR="$(cd "$(dirname "$AB_SELF")" && pwd)"  # resolve symlinks: ~/.local/bin/agent -> ~/.claude-bridge/bin/agent -> app
+sleep 0.3; exec "$AB_DIR/bridge-hook" --text

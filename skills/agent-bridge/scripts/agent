@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agent ping <target> | agent <target> <message...> | agent list | agent inbox | agent listen | agent up/down/status/logs/reset
-D="$(dirname "$0")"; R="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"
+AB_SELF="$0"; while [ -L "$AB_SELF" ]; do AB_L="$(readlink "$AB_SELF")"; case "$AB_L" in /*) AB_SELF="$AB_L";; *) AB_SELF="$(dirname "$AB_SELF")/$AB_L";; esac; done; AB_DIR="$(cd "$(dirname "$AB_SELF")" && pwd)"  # resolve symlinks: ~/.local/bin/agent -> ~/.claude-bridge/bin/agent -> app
+D="$AB_DIR"; R="${BRIDGE_DIR:-$HOME/.claude-bridge}"; me="$("$D/bridge-whoami")"
 dashboard_tier() {
   local now="$1" h5="$2" wk="$3" mo="$4" h5r="$5" wkr="$6" mor="$7" best=101 penal=0 any=0 p r wn len rem tier
   for item in "h5:18000:$h5:$h5r" "wk:604800:$wk:$wkr" "mo:2592000:$mo:$mor"; do
@@ -27,7 +28,7 @@ case "$1" in
         mkdir -p "$R/runs" "$R/logs"; if command -v setsid >/dev/null 2>&1; then setsid nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & else nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & fi; echo $! > "$R/runs/$n.pid"; echo "$n: up (pid $!)"; done
       # the desktop widget starts with the workers (idempotent; WIDGET=0 in ~/.claude-bridge/config or BRIDGE_WIDGET=0 disables it)
       [ "${BRIDGE_WIDGET:-$(sed -n 's/^WIDGET=//p' "$R/config" 2>/dev/null | head -1)}" = 0 ] || [ ! -x "$D/bridge-widget" ] || ( "$D/bridge-widget" start --quiet & ) >/dev/null 2>&1;;
-  down) shift; names=("$@"); [ "$1" = all ] && names=($(ls "$R/runs" 2>/dev/null | sed 's/\.pid$//'))
+  down) shift; names=("$@"); [ "$1" = all ] && names=($(ls "$R/runs" 2>/dev/null | sed -n 's/\.pid$//p'))
       for n in "${names[@]}"; do p="$(cat "$R/runs/$n.pid" 2>/dev/null)"; [ -n "$p" ] && kill "$p" 2>/dev/null && echo "$n: stopped" || echo "$n: was not up"; rm -f "$R/runs/$n.pid"; done;;
   status) now=$(date +%s); for n in $(awk -F= '{print $2}' "$R/names.conf"); do
       if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then

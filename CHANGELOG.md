@@ -2,6 +2,13 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.4
+
+- Fix: `agent`, `admin` and the other scripts now follow symlink chains (`~/.local/bin/agent` -> `~/.claude-bridge/bin/agent` -> app) to find their siblings; before, `bridge-whoami` was not found and `agent up all` could start a runner for the admin session itself.
+- `agent update` restarts idle runners on the new code (busy ones are listed); runners kept the old code in memory, so e.g. the "Sesión caída" state never showed after an update.
+- `agent down all` ignores `.state` files.
+- Widget shows the project version where the clock was (hover for the last update time).
+
 ## 1.6.3
 
 - macOS: runner time limits fall back to `perl` when `timeout`/`gtimeout` are missing; the installer no longer prints the "no 'timeout'" note unless perl is missing too, and the update check has the same fallback.

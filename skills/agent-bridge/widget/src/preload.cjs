@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('bridgeWidget', {
   },
   onSettings: (callback) => ipcRenderer.on('dashboard:settings', (_event, settings) => callback(settings)),
   close: () => ipcRenderer.send('dashboard:close'),
+  version: () => ipcRenderer.invoke('version:get'),
   updateCurrent: () => ipcRenderer.invoke('update:current'),
   onUpdateState: (callback) => ipcRenderer.on('update:state', (_event, state) => callback(state)),
   applyUpdate: () => ipcRenderer.send('update:apply'),
