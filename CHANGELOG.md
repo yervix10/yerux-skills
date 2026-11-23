@@ -2,7 +2,12 @@
 
 Notable changes to the whole repository, newest first.
 
-## Unreleased
+## 1.5.0
+
+- `agent update [--check] [--yes]`: updates to the newest `vX.Y.Z` tag; the installed version lives in `~/.claude-bridge/version`.
+- The widget shows an "update available" banner (hourly check) with an update button, and a close button; flat, light-only look; the admin card no longer has a left bar.
+- The installer menu handles arrow keys on macOS terminals (echo is turned off with `stty`).
+- `/admin` starts every worker and leaves `agent listen` running.
 
 ### Repository
 - Every skill, **agent-bridge** included, now lives under `skills/`. Installers, bootstrap scripts, CI and docs follow the new paths.
@@ -20,13 +25,6 @@ Notable changes to the whole repository, newest first.
 - Activity feed (`agent feed`) with redaction of secret-like values, and a richer widget detail panel.
 - Claude context is kept while a turn is running; quota and native compaction reporting improved; decimal percentages and locale-safe cost formatting.
 - Kiro CLI worker (`kiro-N`) with complete replies joined across tool calls and a single bridge response per order.
-
-## 1.5.0
-
-- `agent update [--check] [--yes]`: updates to the newest `vX.Y.Z` tag; the installed version lives in `~/.claude-bridge/version`.
-- The widget shows an "update available" banner (hourly check) with an update button, and a close button; flat, light-only look; the admin card no longer has a left bar.
-- The installer menu handles arrow keys on macOS terminals (echo is turned off with `stty`).
-- `/admin` starts every worker and leaves `agent listen` running.
 
 ## 1.4.0
 - Status line data is on by default at install (`--no-statusline` skips it); `--check` verifies it. Not available on Windows.
