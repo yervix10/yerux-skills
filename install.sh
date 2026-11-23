@@ -502,7 +502,11 @@ each "$CLAUDE_LIST" step_claude; each "$CODEX_LIST" step_codex; each "$KIRO_LIST
 [ -n "$COPILOT_LIST" ] && ui_info "GitHub Copilot CLI: sign in once (copilot, then /login); each order spends premium requests of your monthly quota"
 [ -n "$OPENCODE_LIST" ] && ui_info "OpenCode: all opencode-N workers share your opencode credentials; only *-free / *:free models are accepted unless BRIDGE_OPENCODE_PAID=1. Set a model with: agent model opencode-N <provider/model>"
 NACC=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$CLAUDE_LIST" "$CODEX_LIST" "$KIRO_LIST" "$AGY_LIST" "$CURSOR_LIST" "$COPILOT_LIST" "$OPENCODE_LIST" | sed '/^$/d' | wc -l | tr -d ' ')
-[ "$NACC" -gt 0 ] || ui_warn "No accounts found. Use --claude-dir DIR / --codex-dir DIR."
+if [ "$NACC" -eq 0 ]; then   # no agent CLI found: explain instead of a confusing "0 accounts configured"
+  ui_box "No agent found" "No Claude Code, Codex, Kiro, Antigravity, Cursor, Copilot or OpenCode folder was found in $(tilde "$HOME")." "" "${BOLD}What to do${RST}" "  1. Install one of them and open it once (for example run: claude)," "     so it creates its folder, then run this installer again." "  2. Or point to an existing folder:  ./install.sh --claude-dir DIR  (also --codex-dir DIR)" "" "No agent is connected to the bridge yet."
+  [ $DRY = 1 ] && { say; say "dry-run finished: nothing was written."; }
+  exit 0
+fi
 if [ $DRY = 1 ]; then say; say "dry-run finished: nothing was written."; exit 0; fi
 lines=("${GRN}${S_OK}${RST} $NACC account(s) configured")
 [ "${UI_FAILS:-0}" -gt 0 ] && lines=("${RED}${S_FAIL}${RST} ${UI_FAILS} step(s) failed - see $UI_LOG")

@@ -33,7 +33,8 @@ function Ui-Box($title, $lines) {
 $script:Fast = $false
 function Ui-Sleep { if (-not $script:Fast) { Start-Sleep -Milliseconds 50 } }
 function Ui-Banner {
-  $w = 50; $t1 = '  yerux - skills  installer   v1.4.0'; $t2 = '  * featured: agent-bridge'
+  $ver = ''; try { $ver = (Get-Content (Join-Path $Root 'VERSION') -TotalCount 1 -ErrorAction Stop).Trim() } catch {}
+  $w = 50; $t1 = '  yerux - skills  installer' + $(if ($ver) { "   v$ver" } else { '' }); $t2 = '  * featured: agent-bridge'
   Say ''; Ui-W ("  " + $S.tl + ($S.h * $w) + $S.tr) 'Cyan'; Ui-Sleep
   Ui-W ("  " + $S.v + $t1.PadRight($w) + $S.v) 'Cyan'; Ui-Sleep
   Ui-W ("  " + $S.v + $t2.PadRight($w) + $S.v) 'DarkCyan'; Ui-Sleep
@@ -268,7 +269,8 @@ function Ui-Stepper($cur) {
 function Ui-Keys($keys) { Write-Host '  ' -NoNewline; foreach ($k in $keys) { $w, $r = $k -split ' ', 2; Ui-W $w 'Cyan' -NoNewline; Ui-W " $r   " 'DarkGray' -NoNewline }; Say '' }
 function Menu-Screen($n, $keys) { $script:Fast = $true; Clear-Host; Ui-Banner; Ui-Stepper $n; Say ''; Ui-Keys $keys; Say '' }
 function Info-Wait { while ($true) { $k = [Console]::ReadKey($true); if ($k.Key -eq 'Enter') { return $false }; if ($k.KeyChar -eq 'b' -or $k.KeyChar -eq 'B') { return $true } } }
-if (-not $Yes -and -not $DryRun -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+$hasConsole = $true; try { [void][Console]::WindowHeight } catch { $hasConsole = $false }   # no console window (service, hidden host, CI): the arrow-key menu cannot run
+if (-not $Yes -and -not $DryRun -and $hasConsole -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
   # accounts as detected (information only); packages are the only selectable step
   $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }; foreach ($d in $Kiro) { $acc += [pscustomobject]@{ Kind = 'kiro'; Dir = $d } }; foreach ($d in $Agy) { $acc += [pscustomobject]@{ Kind = 'antigravity'; Dir = $d } }; foreach ($d in $Cursor) { $acc += [pscustomobject]@{ Kind = 'cursor'; Dir = $d } }; foreach ($d in $Copilot) { $acc += [pscustomobject]@{ Kind = 'copilot'; Dir = $d } }; foreach ($d in $OpenCode) { $acc += [pscustomobject]@{ Kind = 'opencode'; Dir = $d } }
   $pk = New-Object System.Collections.ArrayList
@@ -341,7 +343,17 @@ foreach ($d in $OpenCode) { $n = $Map[$d]
 if ($Cursor.Count -gt 0) { if (Cursor-Agent-Clash) { Say "! the 'agent' on your PATH is Cursor's, not the bridge's. The bridge only calls cursor-agent; reinstall the bridge command (install.ps1 without -NoPath)." }; Say 'Cursor: sign in with: cursor-agent login' }
 if ($Copilot.Count -gt 0) { Say 'GitHub Copilot CLI: sign in once (copilot, then /login); each order spends premium requests of your monthly quota' }
 if ($OpenCode.Count -gt 0) { Say 'OpenCode: all opencode-N workers share your opencode credentials; only *-free / *:free models are accepted unless BRIDGE_OPENCODE_PAID=1' }
-if ($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Copilot.Count + $OpenCode.Count -eq 0) { Say 'No accounts found. Use -ClaudeDir DIR / -CodexDir DIR / -KiroDir DIR / -AgyDir DIR / -CursorDir DIR / -CopilotDir DIR / -OpenCodeDir DIR.' }
+if ($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Copilot.Count + $OpenCode.Count -eq 0) {
+  # no agent CLI found: explain instead of a confusing "0 accounts configured"
+  Ui-Box 'No agent found' @(
+    'No Claude Code, Codex, Kiro, Antigravity, Cursor, Copilot or OpenCode folder was found in your user folder (~).',
+    '', 'What to do',
+    '  1. Install one of them and open it once (for example run: claude),',
+    '     so it creates its folder, then run this installer again.',
+    '  2. Or point to an existing folder:  .\install.ps1 -ClaudeDir DIR  (also -CodexDir DIR ...)',
+    '', 'No agent is connected to the bridge yet.')
+  if ($DryRun) { Say ''; Say 'dry-run finished: nothing was written.' }
+  return }
 if ($DryRun) { Say ''; Say 'dry-run finished: nothing was written.'; return }
 $msg = if ($script:Fails -gt 0) { "$($S.fail) $($script:Fails) step(s) failed" } else { "$($S.ok) $($Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Copilot.Count + $OpenCode.Count) account(s) configured" }
 $sum = @($msg); if ($SelSkills.Count -gt 0) { $sum += "$($S.ok) skills: $($SelSkills -join ' ')" }

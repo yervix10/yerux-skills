@@ -39,7 +39,8 @@ CURSOR_PERM=(--force --trust); [ "$BYPASS" = safe ] && CURSOR_PERM=(--trust); [ 
 # GitHub Copilot: bypass=1 allows every tool; safe/0 only read tools (no shell, no writes).
 COPILOT_PERM=(--allow-all-tools); [ "$BYPASS" = safe ] || [ "$BYPASS" = 0 ] && COPILOT_PERM=(--allow-tool=read)
 # OpenCode: models cost money unless they end in -free (or are openrouter ...:free). Paid ones need BRIDGE_OPENCODE_PAID=1.
-oc_model_ok() { case "$1" in *-free|*:free) return 0;; esac; [ "${BRIDGE_OPENCODE_PAID:-0}" = 1 ]; }
+OC_PAID="${BRIDGE_OPENCODE_PAID:-$(sed -n 's/^OPENCODE_PAID=//p' "$B/config" 2>/dev/null | head -1)}"   # env or OPENCODE_PAID=1 in ~/.claude-bridge/config (survives restarts)
+oc_model_ok() { case "$1" in *-free|*:free) return 0;; esac; [ "${OC_PAID:-0}" = 1 ]; }
 log "bypass=$BYPASS"
 # ---- observability: state file (read by `agent status`), heartbeat, and alerts to the admin ----
 ST="$B/runs/$name.state"; ALERT="${BRIDGE_ALERT:-$(sed -n 's/^ALERT=//p' "$B/config" 2>/dev/null | head -1)}"; ALERT="${ALERT:-1800}"

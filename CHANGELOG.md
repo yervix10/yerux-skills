@@ -2,6 +2,17 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.9
+
+Windows installer, tested on a Windows Server 2022 VM (Windows PowerShell 5.1):
+- Fix: the one-liner failed on stock Windows client editions (execution policy `Restricted`) when it started `install.ps1`; the installer now runs in a child PowerShell with a process-scoped `Bypass` (no administrator rights) and explains when an organisation policy forbids it.
+- Fix: a file of an older copy held by an antivirus or another process aborted the update half-way; it now retries, and otherwise updates in place file by file and lists what stayed in use.
+- Fix: `AGENT_BRIDGE_ARGS` with a single argument (e.g. `-Yes`) failed with a "name" argument error.
+- Fix: the Windows banner always said v1.4.0; it now shows the real version.
+- Fix: no more "The handle is invalid" when the installer has no console window.
+- When no agent CLI is found, a "No agent found" box explains what to do (Linux/macOS and Windows) instead of "0 account(s) configured".
+- `OPENCODE_PAID=1` in `~/.claude-bridge/config` allows paid OpenCode models and survives runner restarts (the env var `BRIDGE_OPENCODE_PAID=1` still works).
+
 ## 1.6.8
 
 - Faster update notices: the widget checks every 60 s while visible (5 min when hidden or minimized, +-10% jitter) instead of every 15 min. Updates are still never applied without the user choosing to.

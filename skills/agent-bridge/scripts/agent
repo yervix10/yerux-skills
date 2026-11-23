@@ -143,7 +143,7 @@ case "$1" in
           if [ "$kind" = antigravity ] && { ! command -v agy >/dev/null 2>&1 || ! agy models 2>/dev/null | awk -F'\t' -v m="$val" '$1==m{f=1} END{exit !f}'; }; then echo "unknown Antigravity model or agy not available (see: agy models)" >&2; return 1; fi
           if [ "$kind" = opencode ]; then
             case "$val" in */*) ;; *) echo "OpenCode models are provider/model (see: opencode models)" >&2; return 1;; esac
-            case "$val" in *-free|*:free) ;; *) [ "${BRIDGE_OPENCODE_PAID:-0}" = 1 ] || { echo "$val is not a free model: OpenCode workers accept only *-free / *:free models (set BRIDGE_OPENCODE_PAID=1 to allow paid ones)" >&2; return 1; };; esac
+            case "$val" in *-free|*:free) ;; *) [ "${BRIDGE_OPENCODE_PAID:-$(sed -n 's/^OPENCODE_PAID=//p' "$R/config" 2>/dev/null | head -1)}" = 1 ] || { echo "$val is not a free model: OpenCode workers accept only *-free / *:free models (set BRIDGE_OPENCODE_PAID=1 or OPENCODE_PAID=1 in ~/.claude-bridge/config to allow paid ones)" >&2; return 1; };; esac
             if ! command -v opencode >/dev/null 2>&1 || ! opencode models 2>/dev/null | grep -qxF "$val"; then echo "unknown OpenCode model or opencode not available (see: opencode models)" >&2; return 1; fi; fi
           if [ "$kind" = cursor ] && { ! command -v cursor-agent >/dev/null 2>&1 || ! cursor-agent models 2>/dev/null | awk -v m="$val" '$1==m{f=1} END{exit !f}'; }; then echo "unknown Cursor model or cursor-agent not available (see: cursor-agent models)" >&2; return 1; fi; fi
         mkdir -p "$(dirname "$file")"; printf '%s' "$val" > "$file"; echo "$n: $what set to $val (applies from its next order)"; }
