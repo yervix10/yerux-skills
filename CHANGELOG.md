@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.5.1
+
+- New state **Sesión caída**: when a worker's order fails because the account is signed out or its session expired, the runner records `auth` (not a generic API error), `agent dashboard --json` reports `state: "auth"`, and the widget shows a clear notice on top.
+- The admin card in the widget is soft violet (no left bar).
+
 ## 1.5.0
 
 - `agent update [--check] [--yes]`: updates to the newest `vX.Y.Z` tag; the installed version lives in `~/.claude-bridge/version`.
