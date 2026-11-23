@@ -3,7 +3,9 @@
 const { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, session, Tray } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const os = require('node:os');
+const { promisify } = require('node:util');
 const { pathToFileURL } = require('node:url');
 const { fetchDashboard } = require('./poll.cjs');
 const { normalizeGroupOpen } = require('./metrics.js');
@@ -223,6 +225,23 @@ function runAdminAction(agent, args) {
   }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout.trim())));
 }
 
+// Update check: `agent update --check --json` hourly; the banner offers `agent update --yes` on click.
+let updateState = { available: false };
+function bridgeAgentCommand() {
+  const root = path.resolve(process.env.BRIDGE_DIR || path.join(os.homedir(), '.claude-bridge'));
+  return path.join(root, 'bin', 'agent');
+}
+async function checkUpdate() {
+  if (quitting || process.platform === 'win32') return;
+  try {
+    const { stdout } = await promisify(execFile)(bridgeAgentCommand(), ['update', '--check', '--json'], { encoding: 'utf8', timeout: 30_000, shell: false, windowsHide: true });
+    const info = JSON.parse(stdout);
+    updateState = { available: info.available === true, latest: String(info.latest || ''), installed: String(info.installed || '') };
+    if (window && !window.isDestroyed() && !window.webContents.isLoadingMainFrame()) window.webContents.send('update:state', updateState);
+  } catch (error) { console.error('update check falló:', error && error.message); }
+  if (!quitting) setTimeout(checkUpdate, 60 * 60 * 1000).unref?.();
+}
+
 async function poll(force = false) {
   clearTimeout(pollingTimer);
   if (quitting || !window || window.isDestroyed() || (!force && (!window.isVisible() || window.isMinimized())) || currentPoll) return;
@@ -324,6 +343,7 @@ async function createWidget() {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
+  window.webContents.once('did-finish-load', () => setTimeout(checkUpdate, 3000));
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
 
   const fromWidget = (event) => event.sender === window.webContents &&
@@ -379,6 +399,12 @@ async function createWidget() {
   ipcMain.handle('control:copy-text', (event, value) => {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || typeof value !== 'string' || value.length > 4000) return false;
     clipboard.writeText(value); return true;
+  });
+  ipcMain.handle('update:current', (event) => { if (fromWidget(event)) return updateState; });
+  ipcMain.on('update:apply', (event) => {
+    if (!fromWidget(event) || !updateState.available) return;
+    // The update script restarts the widget on the new code, so it runs detached from this process.
+    spawn(bridgeAgentCommand(), ['update', '--yes'], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
   });
   ipcMain.on('dashboard:close', (event) => { if (fromWidget(event)) app.quit(); });
   ipcMain.on('dashboard:visible', (event, visible) => {

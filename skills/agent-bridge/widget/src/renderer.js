@@ -9,6 +9,22 @@ const summary = document.querySelector('#summary');
 const updated = document.querySelector('#updated');
 const toggle = document.querySelector('#toggle');
 document.querySelector('#close').addEventListener('click', () => window.bridgeWidget.close());
+const updateBanner = document.querySelector('#update-banner');
+let updateInfo = { available: false };
+function showUpdate(info) {
+  updateInfo = info || { available: false };
+  updateBanner.hidden = !updateInfo.available;
+  if (updateInfo.available) document.querySelector('#update-text').textContent = `Actualización disponible · v${updateInfo.latest}`;
+}
+window.bridgeWidget.updateCurrent().then(showUpdate);
+window.bridgeWidget.onUpdateState(showUpdate);
+document.querySelector('#update-apply').addEventListener('click', () => {
+  askConfirmation(`Actualizar de v${updateInfo.installed} a v${updateInfo.latest}? El widget se reiniciará.`, () => {
+    document.querySelector('#update-text').textContent = 'Actualizando…';
+    document.querySelector('#update-apply').disabled = true;
+    window.bridgeWidget.applyUpdate();
+  });
+});
 const content = document.querySelector('#content');
 const connection = document.querySelector('#connection');
 const announcement = document.querySelector('#announcement');

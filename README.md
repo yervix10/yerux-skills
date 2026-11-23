@@ -28,6 +28,16 @@ On Windows pass the same options with `$env:AGENT_BRIDGE_ARGS='-Yes -Skills all'
 From a clone: `./install.sh` (Linux/macOS/WSL) or `.\install.ps1` (Windows).
 `--uninstall` removes agent-bridge and the extra skills the installer added; the mailbox `~/.claude-bridge` is kept.
 
+## Updating
+
+Releases are git tags named `vX.Y.Z`. The installed version is stored in `~/.claude-bridge/version`.
+
+    agent update --check     is there a newer tag? (changes nothing)
+    agent update --yes       download that tag and run the installer on it (asks without --yes)
+
+The desktop widget checks once an hour and shows an **Actualización disponible** banner; one click (after a confirmation)
+runs `agent update --yes` and restarts the widget. Nothing is installed automatically.
+
 ## Repository layout
 
     skills/               every skill, one folder each, named <topic>-<type>

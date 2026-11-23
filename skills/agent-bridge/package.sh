@@ -23,6 +23,7 @@ do_scripts() {
   [ ! -f "$BR/admin" ] || chmod 600 "$BR/admin"
   for live_file in "$BR"/logs/*.live; do [ ! -f "$live_file" ] || chmod 600 "$live_file"; done
   for s in "$SRC"/scripts/*; do chmod +x "$s"; ln -sfn "$s" "$BR/bin/$(basename "$s")"; done
+  [ ! -f "$SRC/../../VERSION" ] || cp "$SRC/../../VERSION" "$BR/version"
   printf '%s\n' "$MAP" | sed '/^$/d' > "$conf"; printf 'BYPASS=%s\n' "$OPT_BYPASS" > "$BR/config"; do_widget; }
 # Desktop widget (Electron): linked at ~/.claude-bridge/widget and installed with npm when Node >= 22.12 exists. BRIDGE_INSTALL_WIDGET=0 skips it.
 do_widget() { [ "${BRIDGE_INSTALL_WIDGET:-1}" = 1 ] && [ -d "$SRC/widget" ] || return 0

@@ -15,6 +15,7 @@ jobs:
       - name: Security and feed tests
         run: |
           bash skills/agent-bridge/tests/bridge-security.test.sh
+          bash skills/agent-bridge/tests/agent-update.test.sh
           node --test skills/agent-bridge/widget/test/feed.test.cjs
   macos:
     runs-on: macos-latest
@@ -24,6 +25,7 @@ jobs:
       - run: echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
       - run: |
           bash skills/agent-bridge/tests/bridge-security.test.sh
+          bash skills/agent-bridge/tests/agent-update.test.sh
           node --test skills/agent-bridge/widget/test/feed.test.cjs
   windows-syntax:
     runs-on: windows-latest

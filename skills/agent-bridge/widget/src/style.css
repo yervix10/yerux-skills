@@ -237,6 +237,10 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .metric-context .metric-label { color: var(--muted); }
 .metric.tightest-limit { margin: -2px -4px; padding: 2px 4px; background: color-mix(in srgb, var(--amber) 8%, transparent); border-radius: 5px; }
 .stale { margin-top: 6px; font-size: 9px; font-weight: 650; color: var(--amber); }
+#update-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; padding: 7px 8px 7px 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, #fff); border-radius: 10px; font-size: 10px; font-weight: 650; }
+#update-apply { padding: 4px 10px; color: #fff; background: var(--accent); border: 0; border-radius: 7px; font-size: 10px; font-weight: 650; cursor: pointer; }
+#update-apply:hover { filter: brightness(1.08); }
+#update-apply:disabled { opacity: .55; cursor: default; }
 #connection, .empty { padding: 8px 10px; border-radius: 9px; }
 #connection { margin-bottom: 8px; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); font-size: 10px; font-weight: 650; }
 .empty { color: var(--muted); }

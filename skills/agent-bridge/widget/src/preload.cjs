@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('bridgeWidget', {
   },
   onSettings: (callback) => ipcRenderer.on('dashboard:settings', (_event, settings) => callback(settings)),
   close: () => ipcRenderer.send('dashboard:close'),
+  updateCurrent: () => ipcRenderer.invoke('update:current'),
+  onUpdateState: (callback) => ipcRenderer.on('update:state', (_event, state) => callback(state)),
+  applyUpdate: () => ipcRenderer.send('update:apply'),
   visibility: (visible) => ipcRenderer.send('dashboard:visible', visible),
   setGroupOpen: (group, open) => ipcRenderer.send('dashboard:group-open', group, open),
   layout: (height, collapsed, renderedData) => {
