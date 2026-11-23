@@ -8,6 +8,7 @@ const verticalBorder = parseFloat(panelStyle.borderTopWidth) + parseFloat(panelS
 const summary = document.querySelector('#summary');
 const updated = document.querySelector('#updated');
 const toggle = document.querySelector('#toggle');
+document.querySelector('#close').addEventListener('click', () => window.bridgeWidget.close());
 const content = document.querySelector('#content');
 const connection = document.querySelector('#connection');
 const announcement = document.querySelector('#announcement');

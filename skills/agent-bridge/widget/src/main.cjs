@@ -380,6 +380,7 @@ async function createWidget() {
     if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || typeof value !== 'string' || value.length > 4000) return false;
     clipboard.writeText(value); return true;
   });
+  ipcMain.on('dashboard:close', (event) => { if (fromWidget(event)) app.quit(); });
   ipcMain.on('dashboard:visible', (event, visible) => {
     if (!fromWidget(event) || typeof visible !== 'boolean') return;
     clearTimeout(pollingTimer);
