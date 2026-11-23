@@ -12,9 +12,11 @@ const usage = { used: null, resets_at: null };
 test('define acento violeta admin coherente y variantes de vista compacta/detalle', () => {
   const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
   const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer.js'), 'utf8');
-  assert.match(css, /\.agent-admin[\s\S]*?box-shadow: inset 3px 0 0 var\(--admin-accent\)/);
+  assert.doesNotMatch(css, /inset \d+px 0 0/, 'no left accent bar on cards');
+  assert.doesNotMatch(css, /border-left/);
   assert.match(css, /\.compact\.agent-admin \.identity-labels \{ display: flex; \}/);
-  assert.match(css, /@media \(prefers-color-scheme: light\)[\s\S]*?--admin-accent: #5634ae/);
+  assert.match(css, /--admin-accent: #5b3db5/);
+  assert.doesNotMatch(css, /prefers-color-scheme: dark|color-scheme: dark/, 'light theme only');
   assert.match(css, /\.detail-admin \.feed-admin[\s\S]*?--admin-accent/);
   assert.match(renderer, /agent\.role === 'admin' \? ' agent-admin'/);
   assert.match(renderer, /detailView\.classList\.toggle\('detail-admin', agent\.role === 'admin'\)/);
