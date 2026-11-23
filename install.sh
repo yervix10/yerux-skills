@@ -236,7 +236,8 @@ ms_allsync() { [ $MS_ALL = 1 ] || return 0; local i all=1 v
 # bash 3.2 (macOS) applies `read -s` to stdin, not to -u 3: switch the terminal off echo / line mode explicitly
 MS_STTY=""
 ms_raw_on() { [ -n "$MS_STTY" ] || trap 'ms_raw_off; ui_cursor_on' EXIT INT TERM; MS_STTY="$(stty -g <&3 2>/dev/null || true)"; stty -echo -icanon min 1 time 0 <&3 2>/dev/null || true; }
-ms_raw_off() { if [ -n "$MS_STTY" ]; then stty "$MS_STTY" <&3 2>/dev/null || stty sane <&3 2>/dev/null || true; else stty echo icanon <&3 2>/dev/null || true; fi; }
+ms_raw_off() { { : <&3; } 2>/dev/null || return 0  # fd 3 already closed (menu finished): nothing to restore
+  if [ -n "$MS_STTY" ]; then stty "$MS_STTY" <&3 2>/dev/null || stty sane <&3 2>/dev/null || true; else stty echo icanon <&3 2>/dev/null || true; fi; }
 ms_run() { local k rest first=1 i
   MS_CUR=0; MS_TOP=0; MS_EXTRA=0; MS_DRAWN=0; MS_BACK=0; ui_cursor_off
   ms_raw_on

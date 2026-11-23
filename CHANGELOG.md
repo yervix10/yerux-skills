@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.2
+
+- `bridge-widget stop` (and `agent update`) now close **every** widget instance, whichever folder it was started from; before, a copy left running from an old folder kept running after the others were stopped. `start` also closes copies of other folders.
+- Fixed the harmless `install.sh: line 239: 3: Bad file descriptor` printed after the installer menu.
+
 ## 1.6.1
 
 - The widget looks for updates every 15 minutes (was hourly) and has **Buscar actualizaciones** in its tray menu to check right away.

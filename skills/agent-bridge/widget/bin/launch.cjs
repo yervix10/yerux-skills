@@ -7,6 +7,21 @@ const { setTimeout: delay } = require('node:timers/promises');
 const root = path.join(__dirname, '..');
 const absent = 3;
 
+// Widget main processes (children carry --type=...): any copy started from any folder, e.g. a dev clone and ~/.agent-bridge/app.
+function widgetPids(exceptRoot) {
+  if (process.platform === 'win32') return [];
+  const out = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 5000 });
+  if (out.status !== 0) return [];
+  return out.stdout.split('\n').map((line) => /^\s*(\d+)\s+(.*)$/.exec(line)).filter(Boolean)
+    .filter((m) => Number(m[1]) !== process.pid && /--widget-start(\s|$)/.test(m[2]) && !/--type=/.test(m[2]) && /electron/i.test(m[2]) && /agent-bridge[\\/]widget/.test(m[2]) && !(exceptRoot && m[2].includes(exceptRoot)))
+    .map((m) => Number(m[1]));
+}
+function killStray(exceptRoot) {
+  const pids = widgetPids(exceptRoot);
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+  return pids.length;
+}
+
 async function launch() {
   const action = process.argv[2] ?? 'start';
   if (!['start', 'stop', 'status'].includes(action) || process.argv.length > 3) {
@@ -24,6 +39,7 @@ async function launch() {
     ? ['--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader'] : [];
 
   if (action === 'start') {
+    killStray(root); // a copy started from another folder would run old code next to this one
     const child = spawn(executable, [...graphicsArgs, root, '--widget-start'], {
       cwd: root,
       env,
@@ -55,7 +71,7 @@ async function launch() {
     return result.status === 0;
   }
 
-  const running = request(action);
+  const running = request(action) || (action === 'status' && widgetPids().length > 0);
   if (action === 'status') {
     console.log(running ? 'Widget activo' : 'Widget detenido');
     process.exitCode = running ? 0 : 1;
@@ -66,6 +82,14 @@ async function launch() {
     while (request('status')) {
       if (Date.now() >= deadline) throw new Error('El widget no se detuvo a tiempo');
       await delay(150);
+    }
+  }
+  if (action === 'stop') {
+    // copies the graceful request could not reach (other install folder, hung instance)
+    if (killStray() > 0) {
+      const until = Date.now() + 4000;
+      while (widgetPids().length > 0 && Date.now() < until) await delay(150);
+      for (const pid of widgetPids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
     }
   }
   console.log('Widget detenido');
