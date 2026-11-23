@@ -13,8 +13,12 @@ chmod 600 "$B/admin" 2>/dev/null || true
 for live_file in "$B"/logs/*.live; do [ -e "$live_file" ] && chmod 600 "$live_file"; done
 LOG="$B/logs/$name.log"; NOTES="$B/notes/$name.md"
 # portability: timeout/gtimeout may be missing (macOS); uuid via python3 or uuidgen
-if command -v timeout >/dev/null 2>&1; then TO=timeout; elif command -v gtimeout >/dev/null 2>&1; then TO=gtimeout; else TO=""; fi
-run_to() { local t="$1"; shift; if [ -n "$TO" ] && [ "$t" != 0 ]; then "$TO" "$t" "$@"; else "$@"; fi; }
+if command -v timeout >/dev/null 2>&1; then TO=timeout; elif command -v gtimeout >/dev/null 2>&1; then TO=gtimeout; elif command -v perl >/dev/null 2>&1; then TO=perl; else TO=""; fi
+# perl fallback (stock on macOS): alarm kills the command; map SIGALRM (rc 142) to 124 like timeout(1)
+run_to() { local t="$1"; shift
+  if [ "$t" = 0 ] || [ -z "$TO" ]; then "$@"
+  elif [ "$TO" = perl ]; then perl -e 'alarm shift; exec @ARGV or exit 127' "$t" "$@"; local rc=$?; [ $rc = 142 ] && rc=124; return $rc
+  else "$TO" "$t" "$@"; fi; }
 newuuid() { python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || uuidgen | tr 'A-Z' 'a-z'; }
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 trap 'log "runner stopped"; [ -n "$CHILD" ] && kill "$CHILD" 2>/dev/null; S_STATUS=stopped; sw; exit 0' TERM INT

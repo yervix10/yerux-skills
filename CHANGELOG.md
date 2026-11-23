@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.3
+
+- macOS: runner time limits fall back to `perl` when `timeout`/`gtimeout` are missing; the installer no longer prints the "no 'timeout'" note unless perl is missing too, and the update check has the same fallback.
+
 ## 1.6.2
 
 - `bridge-widget stop` (and `agent update`) now close **every** widget instance, whichever folder it was started from; before, a copy left running from an old folder kept running after the others were stopped. `start` also closes copies of other folders.

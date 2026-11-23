@@ -60,7 +60,7 @@ pm_hint() {
 missing=""; for c in jq awk sed cksum mktemp; do command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; done
 command -v python3 >/dev/null 2>&1 || command -v uuidgen >/dev/null 2>&1 || missing="$missing python3"
 [ -z "$missing" ] || die "missing tools:$missing  ->  $(pm_hint $missing)"
-[ "$OS" = macos ] && ! command -v timeout >/dev/null && ! command -v gtimeout >/dev/null && say "note: no 'timeout' found; runner tasks will have no time limit (brew install coreutils adds one)."
+[ "$OS" = macos ] && ! command -v timeout >/dev/null && ! command -v gtimeout >/dev/null && ! command -v perl >/dev/null && say "note: no 'timeout' or 'perl' found; runner tasks will have no time limit (brew install coreutils adds one)."
 
 # ---------- discovery ----------
 norm() { local p="$1"; p="${p//\"/}"; p="${p//\'/}"; case "$p" in "~"*) p="$HOME${p#\~}";; esac
@@ -423,8 +423,9 @@ chk_scripts() { local x; for x in agent admin bridge-hook bridge-runner bridge-s
     if [ -x "$BR/bin/$x" ]; then ok "script $x"; else bad "script $x missing or broken in $(tilde "$BR/bin")"; fi; done; }
 # account_ok <claude|codex|kiro> <dir>: silently tells whether the account is already fully set up
 account_ok() { local b=$BAD; QUIET=1; "chk_$1" "$2"; QUIET=0; local r=$((BAD - b)); BAD=$b; [ $r = 0 ]; }
+_to5() { if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout 5 "$@"; elif command -v perl >/dev/null 2>&1; then perl -e 'alarm 5; exec @ARGV' "$@"; else "$@"; fi; }
 upstream_newer() { command -v git >/dev/null 2>&1 && [ -d "$ROOT/.git" ] || return 1
-  local lo re; lo="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; re="$(timeout 5 git -C "$ROOT" ls-remote origin HEAD 2>/dev/null | cut -f1)"; [ -n "$re" ] && [ "$re" != "$lo" ] || return 1
+  local lo re; lo="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"; re="$(_to5 git -C "$ROOT" ls-remote origin HEAD 2>/dev/null | cut -f1)"; [ -n "$re" ] && [ "$re" != "$lo" ] || return 1
   git -C "$ROOT" cat-file -e "$re^{commit}" 2>/dev/null || return 0; ! git -C "$ROOT" merge-base --is-ancestor "$re" "$lo" 2>/dev/null; }
 if [ "$MODE" = check ]; then
   ui_h "Check"; chk_scripts; SB=$BAD; FIX_CLAUDE=""; FIX_CODEX=""; FIX_KIRO=""; FIX_AGY=""; FIX_CURSOR=""; FIX_COPILOT=""; FIX_OPENCODE=""
