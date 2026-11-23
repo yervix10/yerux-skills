@@ -244,7 +244,7 @@ ms_run() { local k rest first=1 i
     case "$k" in
       "") break;;
       " ") [ $MS_N -gt 0 ] && { [ "${MS_ON[$MS_CUR]}" = 1 ] && MS_ON[$MS_CUR]=0 || MS_ON[$MS_CUR]=1; ms_allsync; };;
-      $'\033') IFS= read -rsn2 -t 1 -u 3 rest || rest=""
+      $'\033') rest=""; IFS= read -rsn1 -t 1 -u 3 k2 || k2=""; if [ -n "$k2" ]; then IFS= read -rsn1 -t 1 -u 3 k3 || k3=""; rest="$k2$k3"; fi
         case "$rest" in "[A"|"OA") [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));; "[B"|"OB") [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));; esac;;
       k|K) [ $MS_CUR -gt 0 ] && MS_CUR=$((MS_CUR-1));;
       j|J) [ $MS_CUR -lt $((MS_N-1)) ] && MS_CUR=$((MS_CUR+1));;
