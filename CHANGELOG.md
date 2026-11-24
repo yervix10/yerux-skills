@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.12
+
+- OpenCode workers: the context window is read from the model itself (`opencode models --verbose`, `limit.context`) and cached in `runs/opencode-window.<model>`, instead of assuming 128000. Order of precedence: `BRIDGE_OPENCODE_WINDOW`, `OPENCODE_WINDOW=` in `~/.claude-bridge/config`, the model's real window, 128000. With the wrong window the percentage was inflated and the 40 % compaction fired far too early (a 1M-token model was compacted at ~51k tokens).
+
 ## 1.6.11
 
 - OpenCode/Copilot context window is configurable in `~/.claude-bridge/config` (`OPENCODE_WINDOW=200000`, `COPILOT_WINDOW=...`), so the setting survives runner restarts. The env vars `BRIDGE_OPENCODE_WINDOW` / `BRIDGE_COPILOT_WINDOW` still take precedence. The default stays 128000, which overstated the context percentage for models with a larger window.

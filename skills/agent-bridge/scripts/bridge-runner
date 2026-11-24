@@ -99,7 +99,14 @@ cq_window() { local v m
 # oc_window: context window assumed for OpenCode / Copilot (BRIDGE_OPENCODE_WINDOW / BRIDGE_COPILOT_WINDOW override)
 oc_window() { local v k=OPENCODE_WINDOW; if [ "$kind" = copilot ]; then k=COPILOT_WINDOW; v="${BRIDGE_COPILOT_WINDOW:-}"; else v="${BRIDGE_OPENCODE_WINDOW:-}"; fi
   [ -n "$v" ] || v="$(sed -n "s/^$k=//p" "$B/config" 2>/dev/null | head -1)"   # or OPENCODE_WINDOW= / COPILOT_WINDOW= in ~/.claude-bridge/config (survives restarts)
-  [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }; echo 128000; }
+  [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }
+  if [ "$kind" = opencode ]; then local m="${mdl:-$(cat "$B/models/$name" 2>/dev/null)}"; [ -n "$m" ] && v="$(oc_model_window "$m")"; [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -gt 0 ] && { echo "$v"; return; }; fi
+  echo 128000; }
+# oc_model_window <provider/model>: the model's real context window from `opencode models --verbose` (cached per model in runs/)
+oc_model_window() { local m="$1" f="$B/runs/opencode-window.${1//\//_}" v
+  [ -s "$f" ] && { cat "$f"; return; }
+  v="$(opencode models --verbose 2>/dev/null | awk -v m="$m" '$0==m{f=1;next} f&&/^}/{print;exit} f{print}' | jq -r '.limit.context // empty' 2>/dev/null)"
+  [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -gt 0 ] && { echo "$v" > "$f"; echo "$v"; }; return 0; }
 # ctx_now: context used (%) by this worker, as of the end of its previous order (empty when unknown)
 ctx_now() { local used win
   if [ "$kind" = claude ]; then [ -s "$LIVE" ] || return 0
