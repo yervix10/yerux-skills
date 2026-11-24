@@ -21,7 +21,7 @@ export FAKE_MODE=etag
 out="$("$D/agent-update" --check --json)"; case "$out" in *'"latest":"1.2.0"'*'"available":true'*) ok "first check reads the tags (200)";; *) bad "first: $out";; esac
 [ -s "$T/home/update.etag" ] && ok "etag stored" || bad "etag not stored"
 "$D/agent-update" --check --json >/dev/null; [ "$(calls)" = 1 ] && ok "second check within 45 s reuses the shared result (no request)" || bad "extra request: $(calls)"
-sed -i 's/"checked":[0-9]*/"checked":1/' "$T/home/update.json"
+sed 's/"checked":[0-9]*/"checked":1/' "$T/home/update.json" > "$T/home/update.json.tmp" && mv "$T/home/update.json.tmp" "$T/home/update.json"
 out="$("$D/agent-update" --check --json)"; grep -q inm "$T/log" && ok "later check sends If-None-Match" || bad "no conditional request"
 case "$out" in *'"latest":"1.2.0"'*) ok "304 keeps the cached answer";; *) bad "after 304: $out";; esac
 export FAKE_MODE=limit FAKE_RESET=$(( $(date +%s) + 3600 )); rm -f "$T/home/update.json" "$T/home/update.etag"; n=$(calls)
