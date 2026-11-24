@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.11
+
+- OpenCode/Copilot context window is configurable in `~/.claude-bridge/config` (`OPENCODE_WINDOW=200000`, `COPILOT_WINDOW=...`), so the setting survives runner restarts. The env vars `BRIDGE_OPENCODE_WINDOW` / `BRIDGE_COPILOT_WINDOW` still take precedence. The default stays 128000, which overstated the context percentage for models with a larger window.
+
 ## 1.6.10
 
 - Fixed: OpenCode and Copilot workers never compacted their context. `maybe_compact` had no branch for them and fell into the Codex path (`codex exec resume`), which failed, so the context grew past 100 %. OpenCode now writes a handoff from its own session (fresh session with the summary; fresh session without it if the handoff fails); Copilot starts a fresh session at the threshold.

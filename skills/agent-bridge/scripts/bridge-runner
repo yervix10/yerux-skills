@@ -97,7 +97,9 @@ cq_window() { local v m
   v="${BRIDGE_CURSOR_WINDOW:-}"; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }
   m="$(cat "$B/models/$name" 2>/dev/null)"; case "$m" in *1m*|*sol*|*fable*|*opus-5*) echo 1000000;; *) echo 200000;; esac; }
 # oc_window: context window assumed for OpenCode / Copilot (BRIDGE_OPENCODE_WINDOW / BRIDGE_COPILOT_WINDOW override)
-oc_window() { local v; if [ "$kind" = copilot ]; then v="${BRIDGE_COPILOT_WINDOW:-}"; else v="${BRIDGE_OPENCODE_WINDOW:-}"; fi; [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }; echo 128000; }
+oc_window() { local v k=OPENCODE_WINDOW; if [ "$kind" = copilot ]; then k=COPILOT_WINDOW; v="${BRIDGE_COPILOT_WINDOW:-}"; else v="${BRIDGE_OPENCODE_WINDOW:-}"; fi
+  [ -n "$v" ] || v="$(sed -n "s/^$k=//p" "$B/config" 2>/dev/null | head -1)"   # or OPENCODE_WINDOW= / COPILOT_WINDOW= in ~/.claude-bridge/config (survives restarts)
+  [[ "$v" =~ ^[0-9]+$ ]] && { echo "$v"; return; }; echo 128000; }
 # ctx_now: context used (%) by this worker, as of the end of its previous order (empty when unknown)
 ctx_now() { local used win
   if [ "$kind" = claude ]; then [ -s "$LIVE" ] || return 0
@@ -367,7 +369,7 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
     else
       session_args=(); [ -f "$sf" ] && session_args=(-s "$(cat "$sf")")
       # all opencode-N workers share one install (auth.json); each has its own session and working directory
-      ( cd "$cwd" || exit 1; BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to "$TMO" opencode run -m "$ocm" --format json --dir "$cwd" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
+      ( cd "$cwd" || exit 1; BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" OPENCODE_PERMISSION="${OPENCODE_PERMISSION:-$([ "$BYPASS" = 1 ] && echo '{"external_directory":"allow"}')}" run_to "$TMO" opencode run -m "$ocm" --format json --dir "$cwd" "${session_args[@]}" "$prompt" < /dev/null ) > "$LIVE" 2> "$LIVE.err" & supervise $! || rc=$?
       jq -r 'select(.type=="text")|.part.text // empty' "$LIVE" 2>/dev/null > "$tmp"
       errs="$(jq -r 'select(.type=="error")|(.error.data.message // .error.message // .error.name // "error")' "$LIVE" 2>/dev/null | tr '\n' ' ')"
       [ -n "$errs" ] && [ "$rc" = 0 ] && rc=1
