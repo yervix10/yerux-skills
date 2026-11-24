@@ -173,6 +173,21 @@ $(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed 
 [Handoff summary from the previous $kind conversation:]
 $(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed (rc=$rc), continuing without compaction"; fi
     rm -f "$out"
+  elif [ "$kind" = opencode ]; then
+    out="$(mktemp)"; hf="$B/notes/$name.handoff.md"; local hp="Your context is nearly full and this conversation is about to be replaced by a fresh one. Reply ONLY with a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Do not run tools."
+    local ocm2="$mdl"; [ -n "$ocm2" ] || ocm2="${BRIDGE_OPENCODE_MODEL:-$(opencode models 2>/dev/null | grep -m1 '^opencode/.*-free$')}"
+    if [ -n "$ocm2" ] && oc_model_ok "$ocm2"; then
+      ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 opencode run -m "$ocm2" --format json --dir "$cwd" -s "$(cat "$sf")" "$hp" < /dev/null ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?
+      jq -r 'select(.type=="text")|.part.text // empty' "$B/logs/$name.compact" 2>/dev/null > "$out"
+    else rc=1; fi
+    if [ "$rc" = 0 ] && [ -s "$out" ]; then cp "$out" "$hf"; rm -f "$sf"; prompt="$prompt
+
+[Handoff summary from the previous $kind conversation:]
+$(cat "$hf")"; log "compacted by handoff (was ${c}%)"
+    else rm -f "$sf"; log "handoff failed (rc=$rc): starting a fresh session without summary"; fi
+    rm -f "$out"
+  elif [ "$kind" = copilot ]; then
+    rm -f "$sf"; log "copilot has no compaction: starting a fresh session (was ${c}%)"
   elif [ "$kind" = kiro ]; then
     out="$(mktemp)"; hf="$B/notes/$name.handoff.md"
     ( cd "$cwd" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" run_to 900 kiro-cli chat --no-interactive --trust-all-tools --trust-workspace --output-format stream-json "${MODEL_ARGS[@]}" --resume-id "$(cat "$sf")" "Your context is nearly full. Write a concise handoff (max 40 lines): project/worktree, branch, completed work, in-progress work, decisions, gotchas and exact next steps. Return only the handoff; do not run tools." ) > "$B/logs/$name.compact" 2>&1 & supervise $! || rc=$?

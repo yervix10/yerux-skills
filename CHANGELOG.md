@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.6.10
+
+- Fixed: OpenCode and Copilot workers never compacted their context. `maybe_compact` had no branch for them and fell into the Codex path (`codex exec resume`), which failed, so the context grew past 100 %. OpenCode now writes a handoff from its own session (fresh session with the summary; fresh session without it if the handoff fails); Copilot starts a fresh session at the threshold.
+
 ## 1.6.9
 
 Windows installer, tested on a Windows Server 2022 VM (Windows PowerShell 5.1):
