@@ -183,7 +183,7 @@ main::-webkit-scrollbar-track { background: transparent; }
 .state-working { color: var(--green); }
 .state-idle, .state-off, .state-disabled { color: var(--muted); }
 .agent .state-disabled { text-decoration: line-through; }
-#toggle-enabled.danger { color: #e5534b; }
+#toggle-enabled.danger { color: #e5534b !important; }
 .state-limited, .state-stuck, .state-unknown { color: var(--amber); }
 .state-stuck, .state-auth { color: var(--red); }
 .auth-note { margin-top: 7px; padding: 7px 9px; color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--panel)); border-radius: 8px; font-size: 10px; line-height: 1.45; }
@@ -295,7 +295,8 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 #worker-controls button:disabled, #worker-controls select:disabled { opacity: .5; cursor: not-allowed; }
 #next-order-note { grid-column: 1 / -1; color: var(--muted); font-size: 8px; }
 #control-security-note { grid-column: 1 / -1; color: var(--amber); font-size: 8px; }
-#compact-worker, #toggle-enabled { grid-column: 1 / -1; color: var(--amber) !important; }
+#compact-worker, #toggle-enabled { grid-column: 1 / -1; }
+#compact-worker { color: var(--amber) !important; }
 #control-feedback, #admin-controls-note { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; }
 #admin-controls-note { margin: 0; }
 #copy-compact { margin-top: 6px; font-size: 10px; }

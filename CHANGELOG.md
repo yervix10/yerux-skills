@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.8.3
+
+- Widget: "Bloquear agente" is red ("Activar agente" keeps the default colour).
+
 ## 1.8.2
 
 - Widget: the block/activate button takes the full width, like "Compactar ahora".
