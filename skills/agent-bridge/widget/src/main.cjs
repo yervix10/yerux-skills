@@ -20,7 +20,7 @@ const command = process.argv.includes('--widget-status') ? 'status'
     : process.argv.includes('--widget-start') ? 'start' : 'show';
 const capture = process.argv.includes('--capture') || process.env.BRIDGE_CAPTURE === '1';
 const captureFeed = process.argv.includes('--capture-feed') || process.env.BRIDGE_CAPTURE_FEED === '1';
-const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency', groupOpen: { working: true, free: false } };
+const defaults = { alwaysOnTop: true, showInTaskbar: false, interval: 5, collapsed: false, compact: false, opacity: 100, fontSize: 12, sort: 'urgency', groupOpen: { working: true, free: false, blocked: false } };
 const settingsPath = path.join(app.getPath('userData'), 'widget.json');
 const appIcon = path.join(root, 'assets', 'agent-bridge.png');
 
@@ -424,7 +424,7 @@ async function createWidget() {
     if (visible) poll(); else currentPoll?.abort();
   });
   ipcMain.on('dashboard:group-open', (event, group, open) => {
-    if (!fromWidget(event) || !['working', 'free'].includes(group) || typeof open !== 'boolean') return;
+    if (!fromWidget(event) || !['working', 'free', 'blocked'].includes(group) || typeof open !== 'boolean') return;
     settings.groupOpen = { ...settings.groupOpen, [group]: open };
     saveSettings();
   });

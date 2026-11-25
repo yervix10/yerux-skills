@@ -136,25 +136,26 @@ test('separa admin fijo, sesión caída, trabajando y libres, y ordena urgencia 
     { name: 'working-a', role: 'worker', state: 'working' },
     { name: 'off', role: 'worker', state: 'off' },
     { name: 'no-login', role: 'worker', state: 'auth' },
+    { name: 'blocked', role: 'worker', state: 'disabled' },
   ];
   const groups = partitionAgents(agents);
   assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, values]) => [key, values.map(({ name }) => name)])), {
-    admins: ['admin'], attention: ['no-login'], working: ['working-a', 'working-b'], free: ['limited', 'stuck', 'idle', 'off'],
+    admins: ['admin'], attention: ['no-login'], working: ['working-a', 'working-b'], free: ['limited', 'stuck', 'idle', 'off'], blocked: ['blocked'],
   });
 });
 
 test('valida ajustes persistentes con valores permitidos y valores por defecto', () => {
   assert.deepEqual(normalizeSettings({ compact: true, sort: 'manual', opacity: 80, fontSize: 14 }),
-    { compact: true, sort: 'manual', opacity: 80, fontSize: 14, groupOpen: { working: true, free: false } });
+    { compact: true, sort: 'manual', opacity: 80, fontSize: 14, groupOpen: { working: true, free: false, blocked: false } });
   assert.deepEqual(normalizeSettings({ compact: 1, sort: 'random', opacity: 1, fontSize: 99 }),
-    { compact: false, sort: 'urgency', opacity: 100, fontSize: 12, groupOpen: { working: true, free: false } });
+    { compact: false, sort: 'urgency', opacity: 100, fontSize: 12, groupOpen: { working: true, free: false, blocked: false } });
   assert.deepEqual(normalizeSettings({ groupOpen: { working: 0, free: 1 } }).groupOpen,
-    { working: true, free: false });
+    { working: true, free: false, blocked: false });
 });
 
 test('conserva abierto/cerrado de los acordeones en los ajustes JSON', () => {
   const saved = JSON.parse(JSON.stringify({ groupOpen: { working: false, free: true } }));
-  assert.deepEqual(normalizeSettings(saved).groupOpen, { working: false, free: true });
+  assert.deepEqual(normalizeSettings(saved).groupOpen, { working: false, free: true, blocked: false });
 });
 
 test('el widget acepta todos los estados que emite agent dashboard (p. ej. auth)', () => {

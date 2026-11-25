@@ -41,13 +41,15 @@
     return {
       working: value.working !== false,
       free: value.free === true,
+      blocked: value.blocked === true,
     };
   }
 
   function partitionAgents(agents, mode = 'urgency') {
-    const groups = { admins: [], attention: [], working: [], free: [] };
+    const groups = { admins: [], attention: [], working: [], free: [], blocked: [] };
     for (const agent of agents) {
       if (agent.role === 'admin') groups.admins.push(agent);
+      else if (agent.state === 'disabled') groups.blocked.push(agent);
       else if (agent.state === 'auth') groups.attention.push(agent);
       else if (agent.state === 'working') groups.working.push(agent);
       else groups.free.push(agent);

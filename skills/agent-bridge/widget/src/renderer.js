@@ -43,6 +43,7 @@ const list = document.querySelector('#agents');
 const adminList = document.querySelector('#admins');
 const attentionList = document.querySelector('#attention');
 const workingGroup = { section: document.querySelector('#group-working'), button: document.querySelector('#toggle-working'), count: document.querySelector('#count-working'), list: document.querySelector('#list-working') };
+const blockedGroup = { section: document.querySelector('#group-blocked'), button: document.querySelector('#toggle-blocked'), count: document.querySelector('#count-blocked'), list: document.querySelector('#list-blocked') };
 const freeGroup = { section: document.querySelector('#group-free'), button: document.querySelector('#toggle-free'), count: document.querySelector('#count-free'), list: document.querySelector('#list-free') };
 const detailView = document.querySelector('#detail-view');
 let detailName = null; let detailTimer = null; let detailPinned = true; let detailScroll;
@@ -63,7 +64,7 @@ const percentFormat = new Intl.NumberFormat('es', { style: 'percent', maximumFra
 
 let snapshot = { data: null, disconnected: false };
 let collapsed = false;
-let settings = { compact: false, sort: 'urgency', opacity: 100, fontSize: 12, groupOpen: { working: true, free: false } };
+let settings = { compact: false, sort: 'urgency', opacity: 100, fontSize: 12, groupOpen: { working: true, free: false, blocked: false } };
 const renderedAgents = new Map();
 const agentFingerprints = new Map();
 
@@ -304,6 +305,7 @@ function render() {
   };
   renderGroup('working', workingGroup, groups.working);
   renderGroup('free', freeGroup, groups.free);
+  renderGroup('blocked', blockedGroup, groups.blocked);
   let empty = list.querySelector('.empty');
   if (data && !agents.length) {
     if (!empty) { empty = element('p', 'empty', 'No hay agentes conectados'); list.append(empty); }
@@ -518,6 +520,7 @@ function toggleGroup(key) {
 
 workingGroup.button.addEventListener('click', () => toggleGroup('working'));
 freeGroup.button.addEventListener('click', () => toggleGroup('free'));
+blockedGroup.button.addEventListener('click', () => toggleGroup('blocked'));
 
 toggle.addEventListener('click', (event) => {
   if (event.detail <= 1) flip();

@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.8.4
+
+- Widget: blocked agents go in their own collapsible "Bloqueados" section below "Libres" and "Trabajando" (only shown when there are any).
+
 ## 1.8.3
 
 - Widget: "Bloquear agente" is red ("Activar agente" keeps the default colour).
