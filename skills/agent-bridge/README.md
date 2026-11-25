@@ -9,7 +9,7 @@ It downloads the project to `~/.agent-bridge` and opens a setup menu (accounts, 
 Without a terminal it installs everything detected. Options after `bash -s --`: `--yes`, `--uninstall`, `--list`, `--dry-run`.
 Pin a version with `AGENT_BRIDGE_REF=<tag>`. On Windows pass options with `$env:AGENT_BRIDGE_ARGS='-Yes'`.
 
-Connects Claude Code, Codex, Kiro CLI, Antigravity, Cursor CLI, GitHub Copilot CLI, and OpenCode sessions from different accounts on the same machine.
+Connects Claude Code, Codex, Kiro CLI, Antigravity, Cursor CLI, GitHub Copilot CLI, OpenCode, and Nodecode sessions from different accounts on the same machine.
 
 ### Security boundary
 
@@ -77,6 +77,10 @@ Accounts are also found via CLAUDE_CONFIG_DIR / CODEX_HOME / KIRO_HOME in your e
 ## Adding a provider
 
 `bridge-provider` resolves an explicit `provider` file first, then the standard `.claude*`, `.codex*`, `.kiro*`, `agy*`, `.cursor*`, `.opencode*`, or `.copilot*` config prefix. Implement command/resume/model/effort/compact behavior in `bridge-runner`, optional usage in `bridge-usage`, feed parsing in `bridge-feed`, validation in `agent`, widget capabilities and account steering in the installers. Keep unavailable quotas optional. OpenCode and Copilot were added with exactly this checklist.
+
+### Nodecode (`nodecode-N`, workers only)
+
+[Nodecode](https://nodecode.ai) is supported like OpenCode: one install and one login (`nodecode`, free tier or your plan), N marker folders `~/.nodecode-1`, `~/.nodecode-2`, ... holding `provider` = `nodecode`. `install.sh` creates `~/.nodecode-1` when the `nodecode` binary is present (`BRIDGE_NODECODE_AUTO=0` disables it) or `--nodecode-workers N` creates N. Each order is one `nodecode rpc` turn run by `scripts/bridge-nodecode`; the session id is stored per working directory so the conversation continues. `agent model nodecode-N [PROVIDER/]MODEL` sets the model; there is no effort setting, quota meter or context percentage (Nodecode trims its own context; `agent compact` starts a fresh session). The free tier runs one request at a time, so keep orders short and sequential. Not available on Windows yet.
 
 ### OpenCode (several workers, one install)
 

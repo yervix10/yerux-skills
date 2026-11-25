@@ -80,6 +80,11 @@ case "$kind" in
       used="$(jq -r 'select(.type=="result")|.usage|((.inputTokens // 0)+(.cacheReadTokens // 0))' "$live" 2>/dev/null | tail -1)"
       [[ "$used" =~ ^[0-9]+$ ]] && ctx=$((used * 100 / ctxwin))
     fi;;
+  nodecode) # no quota meter: the free tier runs 1 request at a time; context % is not tracked (Nodecode trims its own)
+    live="$B/logs/$name.live"; model="$(cat "$B/models/$name" 2>/dev/null)"; [ -n "$model" ] || model="default"
+    sf="$(ls -t "$B/sessions/$name"/* 2>/dev/null | while IFS= read -r f; do case "$f" in *.cwd) continue;; esac; [ -f "$f" ] && { printf '%s\n' "$f"; break; }; done)"
+    [ -n "$sf" ] && cwd="$(cat "$sf.cwd" 2>/dev/null)"
+    [ -s "$live" ] && at="$(stat -c %Y "$live" 2>/dev/null || stat -f %m "$live" 2>/dev/null)";;
   opencode|copilot) # no quota meter: model is what the admin set; credits = accumulated cost (OpenCode, USD from step_finish) or premium requests (Copilot)
     live="$B/logs/$name.live"; model="$(cat "$B/models/$name" 2>/dev/null)"; [ -n "$model" ] || model="default"
     sf="$(ls -t "$B/sessions/$name"/* 2>/dev/null | while IFS= read -r f; do case "$f" in *.cwd) continue;; esac; [ -f "$f" ] && { printf '%s\n' "$f"; break; }; done)"

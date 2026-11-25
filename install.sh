@@ -7,7 +7,7 @@
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/skills/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
-DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; COPILOT_LIST=""; OPENCODE_LIST=""; OC_WORKERS=0
+DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; COPILOT_LIST=""; OPENCODE_LIST=""; OC_WORKERS=0; ND_WORKERS=0
 YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT/skills"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
@@ -34,6 +34,7 @@ $2"; shift;;
 $2"; shift;;
   --copilot-dir) [ -n "${2:-}" ] || die "--copilot-dir needs a path (e.g. ~/.copilot)"; COPILOT_LIST="$COPILOT_LIST
 $2"; shift;;
+  --nodecode-workers) [[ "${2:-}" =~ ^[0-9]+$ ]] && [ "$2" -ge 1 ] && [ "$2" -le 32 ] || die "--nodecode-workers needs a number 1-32"; ND_WORKERS="$2"; shift;;
   --opencode-workers) [[ "${2:-}" =~ ^[0-9]+$ ]] && [ "$2" -ge 1 ] && [ "$2" -le 32 ] || die "--opencode-workers needs a number 1-32"; OC_WORKERS="$2"; shift;;
   --opencode-dir) [ -n "${2:-}" ] || die "--opencode-dir needs a path (e.g. ~/.opencode)"; OPENCODE_LIST="$OPENCODE_LIST
 $2"; shift;;
@@ -116,6 +117,11 @@ if command -v copilot >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copilot" ] || [ 
 # (they hold `provider`=opencode, AGENTS.md and the skill). --opencode-workers N creates the first N markers.
 if [ "$OC_WORKERS" -gt 0 ] && [ "$DRY" = 0 ]; then i=1; while [ "$i" -le "$OC_WORKERS" ]; do mkdir -p "$HOME/.opencode-$i"; i=$((i+1)); done; fi
 for d in "$HOME"/.opencode-*; do [ -d "$d" ] && add_dir opencode "$d"; done
+# Nodecode (`nodecode`, https://nodecode.ai): same layout as OpenCode (one install, N marker folders ~/.nodecode-1, ...) but with provider=nodecode;
+# it rides the OpenCode pipeline below and only the marker file differs. --nodecode-workers N creates the first N markers.
+if [ "$ND_WORKERS" -gt 0 ] && [ "$DRY" = 0 ]; then i=1; while [ "$i" -le "$ND_WORKERS" ]; do mkdir -p "$HOME/.nodecode-$i"; i=$((i+1)); done; fi
+for d in "$HOME"/.nodecode-*; do [ -d "$d" ] && add_dir opencode "$d"; done
+if ! ls -d "$HOME"/.nodecode-* >/dev/null 2>&1 && [ "${BRIDGE_NODECODE_AUTO:-1}" != 0 ] && { command -v nodecode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/nodecode" ]; } && [ "$DRY" = 0 ]; then mkdir -p "$HOME/.nodecode-1"; add_dir opencode "$HOME/.nodecode-1"; fi
 if [ -z "$OPENCODE_LIST" ] && [ "${BRIDGE_OPENCODE_AUTO:-1}" != 0 ] && { command -v opencode >/dev/null 2>&1 || [ -x "$HOME/.local/bin/opencode" ]; } && [ "$DRY" = 0 ]; then mkdir -p "$HOME/.opencode-1"; add_dir opencode "$HOME/.opencode-1"; fi
 # current environment
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] && add_dir claude "$CLAUDE_CONFIG_DIR"
@@ -165,7 +171,7 @@ EOF2
 while IFS= read -r d; do [ -n "$d" ] && assign "$d" copilot; done <<EOF2
 $COPILOT_LIST
 EOF2
-while IFS= read -r d; do [ -n "$d" ] && assign "$d" opencode; done <<EOF2
+while IFS= read -r d; do [ -n "$d" ] && { case "$(basename "$d")" in .nodecode-*) assign "$d" nodecode;; *) assign "$d" opencode;; esac; }; done <<EOF2
 $OPENCODE_LIST
 EOF2
 

@@ -65,6 +65,8 @@ act() { [ -s "$LIVE" ] || return 0
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="tool_call" and .subtype=="started")|.tool_call|to_entries[0]|"\(.key|sub("ToolCall$";"")) \((.value.args // {})|(.command // .path // .pattern // .query // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   elif [ "$kind" = opencode ]; then
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.type=="tool_use")|.part|"\(.tool // "tool") \((.state.input // {})|(.command // .filePath // .pattern // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
+  elif [ "$kind" = nodecode ]; then
+    S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select(.payload.frame.event.type!=null)|.payload.frame.event|"\(.type) \((.payload.name // .payload.tool // .payload.command // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   elif [ "$kind" = copilot ]; then
     S_ACT="$(tail -n 60 "$LIVE" | jq -r 'select((.type//"")|test("^tool\\.execution_start"))|"\(.data.toolName // "tool") \((.data.arguments // {})|(.command // .path // .pattern // "")|tostring|.[0:70])"' 2>/dev/null | tail -1 | tr '\n' ' ')"
   else
@@ -125,6 +127,7 @@ ctx_now() { local used win
     [ -s "$LIVE" ] || return 0
     used="$(jq -r 'select(.type=="step_finish")|.part.tokens.total // empty' "$LIVE" 2>/dev/null | tail -1)"
     win="$(oc_window)"; [[ "$used" =~ ^[0-9]+$ ]] && [ "$win" -gt 0 ] && echo $((used * 100 / win))
+  elif [ "$kind" = nodecode ]; then return 0   # Nodecode keeps and trims its own context; `agent compact` just starts a fresh session
   elif [ "$kind" = kiro ]; then
     local sess f; sess="$(cat "$sf" 2>/dev/null)"; [ -n "$sess" ] || return 0
     f="$(find "$dir/sessions" -path "*/$sess/messages.jsonl" -type f 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
@@ -195,6 +198,8 @@ $(cat "$hf")"; log "compacted by handoff (was ${c}%)"; else log "handoff failed 
 $(cat "$hf")"; log "compacted by handoff (was ${c}%)"
     else rm -f "$sf"; log "handoff failed (rc=$rc): starting a fresh session without summary"; fi
     rm -f "$out"
+  elif [ "$kind" = nodecode ]; then
+    rm -f "$sf"; log "nodecode: starting a fresh session (was ${c}%)"
   elif [ "$kind" = copilot ]; then
     rm -f "$sf"; log "copilot has no compaction: starting a fresh session (was ${c}%)"
   elif [ "$kind" = kiro ]; then
@@ -310,7 +315,7 @@ while true; do
 
 Order:
 $body"
-  if [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = opencode ] || [ "$kind" = copilot ]; then prompt="$prompt
+  if [ "$kind" = kiro ] || [ "$kind" = antigravity ] || [ "$kind" = cursor ] || [ "$kind" = opencode ] || [ "$kind" = copilot ] || [ "$kind" = nodecode ]; then prompt="$prompt
 
 Do not use the 'agent' or 'admin' command to send or report your answer. Do not send messages to the admin yourself. The runner forwards exactly one final response automatically; finish by returning your complete final answer as text."; fi
   log "order from $from in $cwd: $(printf '%s' "$body" | head -c 120 | tr '\n' ' ')"
@@ -388,6 +393,14 @@ Do not use the 'agent' or 'admin' command to send or report your answer. Do not 
       oc_cost="$(jq -rs '[.[]|select(.type=="step_finish")|.part.cost // 0]|add // 0' "$LIVE" 2>/dev/null)"
       LC_ALL=C awk -v c="${oc_cost:-0}" -v f="$B/runs/$name.cost" 'BEGIN{t=0; if((getline l < f)>0)t=l+0; printf "%.6f\n", t+c > f}'
     fi
+    RESET_AT=""
+  elif [ "$kind" = nodecode ]; then
+    : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""
+    # one order = one `nodecode rpc` turn (bridge-nodecode); the session id (resume) is kept per working directory like the other workers
+    ( cd "$cwd" || exit 1; BRIDGE_NO_HOOK=1 BRIDGE_NAME="$name" BRIDGE_NODECODE_LIVE="$LIVE" BRIDGE_NODECODE_TIMEOUT="$TMO" "$AB_DIR/bridge-nodecode" "$prompt" "$(cat "$sf" 2>/dev/null)" "$mdl" < /dev/null ) > "$tmp" 2> "$LIVE.err" & supervise $! || rc=$?
+    id="$(sed -n 's/^@@session=//p' "$tmp" | tail -1)"; sed -i.bak '/^@@session=/d' "$tmp" 2>/dev/null && rm -f "$tmp.bak"
+    [ -s "$tmp" ] || { cat "$LIVE.err"; } > "$tmp" 2>/dev/null
+    [ -n "$id" ] && [ "$rc" = 0 ] && echo "$id" > "$sf"
     RESET_AT=""
   elif [ "$kind" = copilot ]; then
     : > "$LIVE"; chmod 600 "$LIVE"; S_ACT=""; S_ACT_AT=""; STALLED_AT=""

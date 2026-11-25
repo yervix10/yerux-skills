@@ -68,7 +68,7 @@ case "$1" in
           ( cd "$HOME" && BRIDGE_NO_HOOK=1 BRIDGE_NAME="$n" CLAUDE_CONFIG_DIR="$dir" claude -p --no-session-persistence --output-format stream-json --verbose "Reply with exactly: ok" > "$R/logs/$n.probe.tmp" 2>/dev/null ) && mv "$R/logs/$n.probe.tmp" "$R/logs/$n.probe" && echo "$n: refreshed" || { rm -f "$R/logs/$n.probe.tmp"; echo "$n: failed (is claude logged in there?)"; };;
           antigravity) echo "$n: Antigravity data comes from its runner log, nothing to refresh";;
           cursor) echo "$n: Cursor data comes from its runner log, nothing to refresh";;
-          opencode|copilot) echo "$n: data comes from its runner log, nothing to refresh";;
+          opencode|copilot|nodecode) echo "$n: data comes from its runner log, nothing to refresh";;
           kiro) echo "$n: Kiro data comes from its sessions, nothing to refresh";;
           *) echo "$n: Codex data comes from its sessions, nothing to refresh";; esac; done;;
   dashboard) # live view (terminal) or --once: a single plain snapshot (what the admin's /dashboard prints)
@@ -135,7 +135,7 @@ case "$1" in
       kind="$("$D/bridge-provider" "$dir" 2>/dev/null || echo other)"
       setone() { local file="$1" val="$2" what="$3"
         if [ "$val" = default ]; then rm -f "$file"; echo "$n: $what back to its default (applies from its next order)"; return 0; fi
-        if [ "$what" = effort ] && { [ "$kind" = cursor ] || [ "$kind" = opencode ]; }; then echo "effort is not configurable for $kind workers (pick a model with the level built in, e.g. a *-high model)" >&2; return 1; fi
+        if [ "$what" = effort ] && { [ "$kind" = cursor ] || [ "$kind" = opencode ] || [ "$kind" = nodecode ]; }; then echo "effort is not configurable for $kind workers (pick a model with the level built in, e.g. a *-high model)" >&2; return 1; fi
         if [ "$what" = effort ]; then case "$kind" in claude|kiro|antigravity) levels="low medium high xhigh max";; copilot) levels="low medium high xhigh";; *) levels="none minimal low medium high xhigh";; esac
           case " $levels " in *" $val "*) ;; *) echo "invalid effort for $kind: use one of $levels, or default" >&2; return 1;; esac
         else [[ "$val" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "invalid model name" >&2; return 1; }
@@ -145,6 +145,7 @@ case "$1" in
             case "$val" in */*) ;; *) echo "OpenCode models are provider/model (see: opencode models)" >&2; return 1;; esac
             case "$val" in *-free|*:free) ;; *) [ "${BRIDGE_OPENCODE_PAID:-$(sed -n 's/^OPENCODE_PAID=//p' "$R/config" 2>/dev/null | head -1)}" = 1 ] || { echo "$val is not a free model: OpenCode workers accept only *-free / *:free models (set BRIDGE_OPENCODE_PAID=1 or OPENCODE_PAID=1 in ~/.claude-bridge/config to allow paid ones)" >&2; return 1; };; esac
             if ! command -v opencode >/dev/null 2>&1 || ! opencode models 2>/dev/null | grep -qxF "$val"; then echo "unknown OpenCode model or opencode not available (see: opencode models)" >&2; return 1; fi; fi
+          if [ "$kind" = nodecode ] && ! command -v nodecode >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/nodecode" ]; then echo "nodecode is not installed" >&2; return 1; fi
           if [ "$kind" = cursor ] && { ! command -v cursor-agent >/dev/null 2>&1 || ! cursor-agent models 2>/dev/null | awk -v m="$val" '$1==m{f=1} END{exit !f}'; }; then echo "unknown Cursor model or cursor-agent not available (see: cursor-agent models)" >&2; return 1; fi; fi
         mkdir -p "$(dirname "$file")"; printf '%s' "$val" > "$file"; echo "$n: $what set to $val (applies from its next order)"; }
       if [ "$cmd" = model ]; then setone "$R/models/$n" "$v" model || exit 1; [ -n "$3" ] && { setone "$R/effort/$n" "$3" effort || exit 1; }

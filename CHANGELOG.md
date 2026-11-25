@@ -2,6 +2,12 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.7.0
+
+- New worker type: **Nodecode** (`nodecode`, https://nodecode.ai). `nodecode-N` workers run each order as one turn of `nodecode rpc` (JSON lines) through the new `scripts/bridge-nodecode`, resume the same Nodecode session per working directory, and work with the free tier (it runs one request at a time). Marker folders `~/.nodecode-1`, `~/.nodecode-2`, ... (`provider` = `nodecode`) are discovered by `install.sh`, created with `--nodecode-workers N`, or auto-created once when the `nodecode` binary is installed (`BRIDGE_NODECODE_AUTO=0` disables it).
+- `agent model <nodecode-N> [PROVIDER/]MODEL` passes the model to the turn; effort is not configurable. No quota meter and no context percentage: Nodecode trims its own context, and `agent compact` just starts a fresh session. Linux/macOS only for now (the Windows runner is unchanged).
+- Test: `tests/nodecode.test.sh` (stubbed `nodecode rpc`, end to end through the runner).
+
 ## 1.6.12
 
 - OpenCode workers: the context window is read from the model itself (`opencode models --verbose`, `limit.context`) and cached in `runs/opencode-window.<model>`, instead of assuming 128000. Order of precedence: `BRIDGE_OPENCODE_WINDOW`, `OPENCODE_WINDOW=` in `~/.claude-bridge/config`, the model's real window, 128000. With the wrong window the percentage was inflated and the 40 % compaction fired far too early (a 1M-token model was compacted at ~51k tokens).
