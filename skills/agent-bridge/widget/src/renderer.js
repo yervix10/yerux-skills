@@ -55,7 +55,7 @@ const toolDetailsOpen = new Set(JSON.parse(localStorage.getItem('bridge-tool-det
 
 const states = {
   admin: 'Admin', idle: 'Libre', working: 'Trabajando', limited: 'Limitado',
-  stuck: 'Atascado', off: 'Apagado', unknown: 'Desconocido', auth: 'Sesión caída',
+  stuck: 'Atascado', off: 'Apagado', disabled: 'Bloqueado', unknown: 'Desconocido', auth: 'Sesión caída',
 };
 const scale = { green: 'normal', amber: 'alto', red: 'crítico' };
 const timeFormat = new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -464,7 +464,9 @@ async function configureControls(agent) {
   if (!options || detailName !== agent.name) return;
   document.querySelector('#next-order-note').textContent = `Activo: ${agent.model || 'predeterminado'} · esfuerzo ${agent.effort || 'predeterminado'}. Cambios desde la próxima orden.`;
   document.querySelector('#control-security-note').hidden = options.authorized;
-  for (const control of document.querySelectorAll('#worker-controls select, #worker-controls button')) control.disabled = !options.authorized;
+  const blocked = agent.state === 'disabled';
+  for (const control of document.querySelectorAll('#worker-controls select, #worker-controls button')) control.disabled = !options.authorized || (blocked && control.id !== 'toggle-enabled');
+  const toggle = document.querySelector('#toggle-enabled'); toggle.textContent = blocked ? 'Activar agente' : 'Bloquear agente'; toggle.classList.toggle('danger', !blocked);
   const fill = (id, values, current) => { const select=document.querySelector(id); if(select.options.length && select.dataset.agent===agent.name) return; select.replaceChildren(); for(const value of values){const option=element('option','',value);option.value=value;select.append(option);} select.value=current;select.dataset.agent=agent.name; };
   fill('#model-select',options.model,options.configuredModel); fill('#effort-select',options.effort,options.configuredEffort);
 }
@@ -479,6 +481,7 @@ function askConfirmation(message, request) { pendingControl=request; document.qu
 document.querySelector('#apply-model').addEventListener('click',()=>{const value=document.querySelector('#model-select').value; if(value==='opus') askConfirmation('Opus tiene mayor costo. ¿Confirmas usarlo para las próximas órdenes?',()=>executeControl('model',value,true)); else executeControl('model',value);});
 document.querySelector('#apply-effort').addEventListener('click',()=>executeControl('effort',document.querySelector('#effort-select').value));
 document.querySelector('#compact-worker').addEventListener('click',()=>askConfirmation('Solicitar compactación ahora. Si el agente trabaja, se ejecutará antes de su próxima orden.',()=>executeControl('compact')));
+document.querySelector('#toggle-enabled').addEventListener('click',()=>{ if(!activeAgent) return; const enable=activeAgent.state==='disabled'; if(enable) executeControl('enabled',true); else askConfirmation('Bloquear el agente: se detiene su runner y el admin no podrá enviarle órdenes hasta que lo actives.',()=>executeControl('enabled',false)); });
 document.querySelector('#confirm-cancel').addEventListener('click',()=>{document.querySelector('#confirm-action').close();pendingControl=null;});
 document.querySelector('#confirm-accept').addEventListener('click',()=>{document.querySelector('#confirm-action').close();const run=pendingControl;pendingControl=null;run?.();});
 document.querySelector('#copy-compact').addEventListener('click',async()=>{const ok=await window.bridgeWidget.copyCompact();document.querySelector('#control-feedback').textContent=ok?'Copiado /compact':'No se pudo copiar';});

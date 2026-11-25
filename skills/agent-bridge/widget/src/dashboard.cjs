@@ -3,7 +3,7 @@
 const choices = {
   role: ['admin', 'worker'],
   kind: ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot', 'nodecode'],
-  state: ['admin', 'idle', 'working', 'limited', 'stuck', 'auth', 'off', 'unknown'],
+  state: ['admin', 'idle', 'working', 'limited', 'stuck', 'auth', 'off', 'disabled', 'unknown'],
   tier: ['', 'heavy', 'normal', 'light', 'skip'],
 };
 const textFields = ['name', 'detail', 'model', 'effort', 'set_model', 'set_effort', 'project', 'branch'];
@@ -46,6 +46,7 @@ function parseDashboard(source) {
     const normalized = Object.fromEntries(
       [...textFields, ...Object.keys(choices), 'context', 'data_age_s'].map((key) => [key, agent[key]]),
     );
+    normalized.disabled = agent.disabled === true;
     if (agent.credit_used !== undefined) {
       if (!(agent.credit_used === null || (Number.isFinite(agent.credit_used) && agent.credit_used >= 0))) throw new TypeError(`Créditos inválidos en la posición ${index}`);
       normalized.credit_used = agent.credit_used;

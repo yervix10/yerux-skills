@@ -395,6 +395,7 @@ async function createWidget() {
       if (request.action === 'effort') {
         return { ok: true, message: await runAdminAction(agent, ['effort', agent.name, request.value]) };
       }
+      if (request.action === 'enabled') return { ok: true, message: await runAdminAction(agent, [request.value ? 'enable' : 'disable', agent.name]) };
       if (request.action === 'compact') return { ok: true, message: await runAdminAction(agent, ['compact', agent.name]) };
       throw new Error('Acción no permitida');
     } catch (error) { return { ok: false, message: error.message }; }

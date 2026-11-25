@@ -7,7 +7,9 @@ to="$1"; shift; msg="${*:-$(cat)}"
 [[ "$to" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "invalid target" >&2; exit 1; }
 [ -n "$msg" ] || { echo "usage: bridge-send <target|all> \"message\"" >&2; exit 1; }
 from="$("$D/bridge-whoami")"; from="${from:-unknown}"
-if [ "$to" = all ]; then for t in $(ls "$B/inbox"); do [ "$t" = "$from" ] || "$0" "$t" "$msg"; done; exit 0; fi
+if [ "$to" = all ]; then for t in $(ls "$B/inbox"); do [ "$t" = "$from" ] || [ -e "$B/disabled/$t" ] || "$0" "$t" "$msg"; done; exit 0; fi
+# an agent blocked with `agent disable` (or from the widget) receives nothing: the admin cannot use it until it is enabled again
+[ ! -e "$B/disabled/$to" ] || { echo "$to is disabled (blocked): enable it with 'agent enable $to' or from the widget" >&2; exit 1; }
 mkdir -p "$B/inbox/$to"
 f="$B/inbox/$to/$(date +%Y%m%dT%H%M%S).$$-de-$from.msg"
 printf 'From: %s\nTo: %s\nDate: %s\nCwd: %s\n\n%s\n' "$from" "$to" "$(date '+%F %T')" "$PWD" "$msg" > "$f.tmp" && mv "$f.tmp" "$f"

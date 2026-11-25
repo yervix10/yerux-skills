@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.8.0
+
+- `agent disable <worker>` / `agent enable <worker>` (admin only): a blocked worker has its runner stopped, `agent up` skips it, and `agent <worker> ...` / `agent all ...` refuse to send it orders until it is enabled again. `agent status` shows `DISABLED`; `agent dashboard --json` adds `disabled` and state `disabled`.
+- Widget: "Bloquear agente" / "Activar agente" button in each worker's controls (with confirmation to block); a blocked card shows "Bloqueado" and its model/effort/compact controls are locked.
+
 ## 1.7.2
 
 - Widget: the collapse/expand button icon is a CSS chevron, centred in its button (the `⌃` text glyph sat off-centre and depended on the font).

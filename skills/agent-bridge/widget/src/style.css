@@ -181,7 +181,9 @@ main::-webkit-scrollbar-track { background: transparent; }
 .state::before { content: ''; width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
 .state-admin { color: var(--accent); }
 .state-working { color: var(--green); }
-.state-idle, .state-off { color: var(--muted); }
+.state-idle, .state-off, .state-disabled { color: var(--muted); }
+.agent .state-disabled { text-decoration: line-through; }
+#toggle-enabled.danger { color: #e5534b; }
 .state-limited, .state-stuck, .state-unknown { color: var(--amber); }
 .state-stuck, .state-auth { color: var(--red); }
 .auth-note { margin-top: 7px; padding: 7px 9px; color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--panel)); border-radius: 8px; font-size: 10px; line-height: 1.45; }

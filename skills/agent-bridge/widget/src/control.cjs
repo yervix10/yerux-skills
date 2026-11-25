@@ -20,11 +20,14 @@ function modelOptions(kind, codexModels = []) {
 
 function validateControl(agent, request, codexModels = []) {
   if (!agent || agent.role === 'admin') return 'Los controles solo están disponibles para workers';
+  if (request?.action !== 'enabled' && agent.state === 'disabled') return 'El agente está bloqueado: actívalo primero';
   if (request?.action === 'model') {
     if (!modelOptions(agent.kind, codexModels).includes(request.value)) return 'Modelo no permitido';
     if (request.value === 'opus' && request.confirmed !== true) return 'Opus requiere confirmación explícita';
     return '';
   }
+  if (request?.action === 'enabled') return typeof request.value === 'boolean' ? '' : 'Valor no permitido';
+  if (agent.state === 'disabled') return 'El agente está bloqueado: actívalo primero';
   if (request?.action === 'effort') return effortOptions(agent.kind).includes(request.value) ? '' : 'Esfuerzo no permitido';
   if (request?.action === 'compact') return ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot', 'nodecode'].includes(agent.kind) ? '' : 'Tipo de agente no compatible';
   return 'Acción no permitida';

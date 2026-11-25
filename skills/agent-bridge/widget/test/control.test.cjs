@@ -33,3 +33,14 @@ test('Kiro controla modelos anunciados, esfuerzo y compactación por handoff', (
   assert.equal(validateControl(kiro, { action: 'effort', value: 'high' }), '');
   assert.equal(validateControl(kiro, { action: 'compact' }), '');
 });
+
+test('bloquear/activar un worker: solo workers, valor booleano, y un bloqueado no acepta otras acciones', () => {
+  const worker = { role: 'worker', kind: 'claude', state: 'idle' };
+  assert.equal(validateControl(worker, { action: 'enabled', value: false }), '');
+  assert.equal(validateControl(worker, { action: 'enabled', value: 'no' }), 'Valor no permitido');
+  assert.match(validateControl({ role: 'admin', kind: 'claude' }, { action: 'enabled', value: false }), /solo están disponibles/);
+  const blocked = { ...worker, state: 'disabled' };
+  assert.equal(validateControl(blocked, { action: 'enabled', value: true }), '');
+  assert.match(validateControl(blocked, { action: 'compact' }), /bloqueado/);
+  assert.match(validateControl(blocked, { action: 'model', value: 'sonnet' }), /bloqueado/);
+});

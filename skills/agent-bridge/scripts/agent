@@ -24,13 +24,22 @@ case "$1" in
   update) shift; exec "$D/agent-update" "$@";;
   up) shift; names=("$@"); [ "$1" = all ] && names=($(awk -F= '{print $2}' "$R/names.conf")); 
       for n in "${names[@]}"; do [ "$n" = "$me" ] && continue
+        [ -e "$R/disabled/$n" ] && { echo "$n: disabled (agent enable $n to use it)"; continue; }
         if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then echo "$n: already up"; continue; fi
         mkdir -p "$R/runs" "$R/logs"; if command -v setsid >/dev/null 2>&1; then setsid nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & else nohup "$D/bridge-runner" "$n" >/dev/null 2>&1 < /dev/null & fi; echo $! > "$R/runs/$n.pid"; echo "$n: up (pid $!)"; done
       # the desktop widget starts with the workers (idempotent; WIDGET=0 in ~/.claude-bridge/config or BRIDGE_WIDGET=0 disables it)
       [ "${BRIDGE_WIDGET:-$(sed -n 's/^WIDGET=//p' "$R/config" 2>/dev/null | head -1)}" = 0 ] || [ ! -x "$D/bridge-widget" ] || ( "$D/bridge-widget" start --quiet & ) >/dev/null 2>&1;;
   down) shift; names=("$@"); [ "$1" = all ] && names=($(ls "$R/runs" 2>/dev/null | sed -n 's/\.pid$//p'))
       for n in "${names[@]}"; do p="$(cat "$R/runs/$n.pid" 2>/dev/null)"; [ -n "$p" ] && kill "$p" 2>/dev/null && echo "$n: stopped" || echo "$n: was not up"; rm -f "$R/runs/$n.pid"; done;;
+  disable|enable) cmd="$1"; shift; n="$1"; adm="$(cat "$R/admin" 2>/dev/null)"
+      [ "$me" = "$adm" ] || { echo "only the admin can $cmd a worker (you are $me)" >&2; exit 1; }
+      [ -n "$n" ] && awk -F= -v n="$n" '$2==n{found=1} END{exit !found}' "$R/names.conf" || { echo "usage: agent $cmd <worker>   (unknown or missing worker: $n)" >&2; exit 1; }
+      [ "$n" != "$adm" ] || { echo "the admin cannot be ${cmd}d" >&2; exit 1; }
+      mkdir -p "$R/disabled"
+      if [ "$cmd" = disable ]; then : > "$R/disabled/$n"; "$0" down "$n" >/dev/null 2>&1; echo "$n: disabled (runner stopped; the admin cannot send it orders until: agent enable $n)"
+      else rm -f "$R/disabled/$n"; echo "$n: enabled (start it with: agent up $n)"; fi;;
   status) now=$(date +%s); for n in $(awk -F= '{print $2}' "$R/names.conf"); do
+      if [ -e "$R/disabled/$n" ]; then echo "$n: DISABLED (blocked; agent enable $n)"; continue; fi
       if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then
         sf="$R/runs/$n.state"; g() { sed -n "s/^$1=//p" "$sf" 2>/dev/null | head -1; }
         st="$(g status)"; since="$(g since)"; beat="$(g beat)"; line="$n: UP"
@@ -80,15 +89,16 @@ case "$1" in
           line="$(printf '%s\n' "$st" | sed -n "s/^$n: *//p" | head -1)"; role=worker; [ "$n" = "$adm" ] && role=admin
           case "$line" in "") state=${role/worker/off}; [ "$role" = admin ] && state=admin;; "-"*) state=off;; *LIMITED*) state=limited;; *"NO HEARTBEAT"*) state=stuck;; *WORKING*) state=working;; *"last order: auth"*) state=auth;; *idle*) state=idle;; *) state=unknown;; esac
           [ "$role" = admin ] && state=admin
+          disabled=false; [ "$role" = worker ] && [ -e "$R/disabled/$n" ] && { disabled=true; state=disabled; }
           want="$(cat "$R/models/$n" 2>/dev/null)"; weff="$(cat "$R/effort/$n" 2>/dev/null)"
           tier=""; [ "$role" = worker ] && tier="$(dashboard_tier "$now" "${h5:-}" "${wk:-}" "${mo:-}" "${h5r:-}" "${wkr:-}" "${mor:-}")"
           kind="$("$D/bridge-provider" "$n" 2>/dev/null || echo other)"
           model_note=""; [ "$kind" != kiro ] || [ "$model" != auto ] || model_note="Kiro elige el modelo según la tarea (Models chosen by task)."
           [ "$kind" = opencode ] && [ -n "$credits" ] && model_note="Coste acumulado: USD $(LC_ALL=C printf '%.4f' "$credits")"
           if [ "$kind" = copilot ]; then tier=light; [ -n "$credits" ] && model_note="Premium requests usados: $credits (cuota mensual)"; fi
-          items+=("$(jq -n --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg model_note "$model_note" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" --arg plan_used "$plan_used" --arg plan_total "$plan_total" --arg plan "$plan" \
+          items+=("$(jq -n --argjson disabled "$disabled" --arg name "$n" --arg role "$role" --arg kind "$kind" --arg state "$state" --arg line "$line" --arg model "$model" --arg model_note "$model_note" --arg eff "$eff" --arg want "$want" --arg weff "$weff" --arg proj "$proj" --arg br "$br" --arg tier "$tier" --arg credits "$credits" --arg plan_used "$plan_used" --arg plan_total "$plan_total" --arg plan "$plan" \
             --arg ctx "$ctx" --arg h5 "$h5" --arg h5r "$h5r" --arg wk "$wk" --arg wkr "$wkr" --arg mo "$mo" --arg mor "$mor" --arg age "$age" \
-            '{name:$name,role:$role,kind:$kind,state:$state,detail:$line,model:$model,model_note:$model_note,effort:$eff,set_model:$want,set_effort:$weff,project:$proj,branch:$br,tier:$tier,credit_used:($credits|tonumber? // null),
+            '{name:$name,role:$role,kind:$kind,state:$state,disabled:$disabled,detail:$line,model:$model,model_note:$model_note,effort:$eff,set_model:$want,set_effort:$weff,project:$proj,branch:$br,tier:$tier,credit_used:($credits|tonumber? // null),
               context:($ctx|tonumber? // null),data_age_s:($age|tonumber? // null),
               five_hour:{used:($h5|tonumber? // null),resets_at:($h5r|tonumber? // null)},
               weekly:{used:($wk|tonumber? // null),resets_at:($wkr|tonumber? // null)},
@@ -155,7 +165,7 @@ case "$1" in
   list) "$D/bridge-send" --list ;;
   inbox) ls "${BRIDGE_DIR:-$HOME/.claude-bridge}/inbox/$me" 2>/dev/null | sed 's/^/pending: /'; echo "(end)" ;;
   listen) exec "$D/bridge-wait" ;;
-  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once|--json] | agent capacity [--apply] | agent widget [start|stop|status] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent compact <worker> | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
+  ""|-h|--help) echo "agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once|--json] | agent capacity [--apply] | agent widget [start|stop|status] | agent enable|disable <worker> | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent compact <worker> | agent refresh [name|all] | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]" ;;
   *) to="$1"; shift
      # the admin is warned when it sends work to a worker with little headroom (it is not blocked)
      if [ "$me" = "$(cat "$R/admin" 2>/dev/null)" ] && [ "$to" != all ] && [ "${#1}" -gt 40 ]; then t="$("$D/bridge-capacity" --tier "$to" 2>/dev/null)"

@@ -36,7 +36,7 @@ const agent = {
 
 test('acepta datos reales del esquema y copia solo campos conocidos', () => {
   const input = { time: 1000, agents: [{ ...agent, extra: 'ignorado' }], extra: true };
-  assert.deepEqual(parseDashboard(JSON.stringify(input)), { time: 1000, agents: [agent] });
+  assert.deepEqual(parseDashboard(JSON.stringify(input)), { time: 1000, agents: [{ ...agent, disabled: false }] });
   assert.deepEqual(parseDashboard('{"time":0,"agents":[]}'), { time: 0, agents: [] });
   assert.equal(parseDashboard(JSON.stringify({ time: 0, agents: [{ ...agent, context: null, data_age_s: null }] })).agents[0].context, null);
 });
