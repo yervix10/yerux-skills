@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.7.2
+
+- Widget: the collapse/expand button icon is a CSS chevron, centred in its button (the `⌃` text glyph sat off-centre and depended on the font).
+
 ## 1.7.1
 
 - Widget: accepts `nodecode` workers (its parser rejected the unknown kind and showed "Sin conexión con el bridge" for the whole dashboard), with a Nodecode badge.
