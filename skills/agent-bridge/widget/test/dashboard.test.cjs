@@ -166,3 +166,8 @@ test('el widget acepta todos los estados que emite agent dashboard (p. ej. auth)
     assert.doesNotThrow(() => parseDashboard(JSON.stringify({ time: 1, agents: [{ ...agent, state }] })), `estado ${state}`);
   }
 });
+
+test('acepta Nodecode como worker (sin cuota ni contexto)', () => {
+  const nd = { ...agent, name: 'nodecode-1', kind: 'nodecode', context: null, five_hour: { used: null, resets_at: null } };
+  assert.equal(parseDashboard(JSON.stringify({ time: 1000, agents: [nd] })).agents[0].kind, 'nodecode');
+});

@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.7.1
+
+- Widget: accepts `nodecode` workers (its parser rejected the unknown kind and showed "Sin conexión con el bridge" for the whole dashboard), with a Nodecode badge.
+
 ## 1.7.0
 
 - New worker type: **Nodecode** (`nodecode`, https://nodecode.ai). `nodecode-N` workers run each order as one turn of `nodecode rpc` (JSON lines) through the new `scripts/bridge-nodecode`, resume the same Nodecode session per working directory, and work with the free tier (it runs one request at a time). Marker folders `~/.nodecode-1`, `~/.nodecode-2`, ... (`provider` = `nodecode`) are discovered by `install.sh`, created with `--nodecode-workers N`, or auto-created once when the `nodecode` binary is installed (`BRIDGE_NODECODE_AUTO=0` disables it).

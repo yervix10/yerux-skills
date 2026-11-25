@@ -202,6 +202,7 @@ main::-webkit-scrollbar-track { background: transparent; }
 .badge-antigravity { color: #1a73e8; background: color-mix(in srgb, #4285f4 12%, var(--card)); border-color: transparent; }
 .badge-cursor { color: #3b3b3b; background: color-mix(in srgb, #7a7a7a 12%, var(--card)); border-color: transparent; }
 .badge-opencode { color: #0a7a5a; background: color-mix(in srgb, #10b981 12%, var(--card)); border-color: transparent; }
+.badge-nodecode { color: #7048e8; background: color-mix(in srgb, #7950f2 12%, var(--card)); border-color: transparent; }
 .badge-copilot { color: #3b5bdb; background: color-mix(in srgb, #4c6ef5 12%, var(--card)); border-color: transparent; }
 .badge-warning { color: var(--amber); }
 .badge-critical { color: var(--red); }
@@ -266,7 +267,7 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 .compact .identity { min-width: 0; }
 .compact .identity-labels { display: none; }
 .compact.agent-admin .identity-labels { display: flex; }
-.compact.agent-kiro .identity-labels, .compact.agent-antigravity .identity-labels, .compact.agent-cursor .identity-labels, .compact.agent-opencode .identity-labels, .compact.agent-copilot .identity-labels { display: flex; }
+.compact.agent-kiro .identity-labels, .compact.agent-antigravity .identity-labels, .compact.agent-cursor .identity-labels, .compact.agent-opencode .identity-labels, .compact.agent-copilot .identity-labels, .compact.agent-nodecode .identity-labels { display: flex; }
 .compact .identity-main { min-width: 0; }
 .compact .agent-name { max-width: 140px; }
 .compact .state { margin-inline-start: auto; }

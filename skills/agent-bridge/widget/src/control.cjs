@@ -26,7 +26,7 @@ function validateControl(agent, request, codexModels = []) {
     return '';
   }
   if (request?.action === 'effort') return effortOptions(agent.kind).includes(request.value) ? '' : 'Esfuerzo no permitido';
-  if (request?.action === 'compact') return ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot'].includes(agent.kind) ? '' : 'Tipo de agente no compatible';
+  if (request?.action === 'compact') return ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot', 'nodecode'].includes(agent.kind) ? '' : 'Tipo de agente no compatible';
   return 'Acción no permitida';
 }
 

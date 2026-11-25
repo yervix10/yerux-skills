@@ -2,7 +2,7 @@
 
 const choices = {
   role: ['admin', 'worker'],
-  kind: ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot'],
+  kind: ['claude', 'codex', 'kiro', 'antigravity', 'cursor', 'opencode', 'copilot', 'nodecode'],
   state: ['admin', 'idle', 'working', 'limited', 'stuck', 'auth', 'off', 'unknown'],
   tier: ['', 'heavy', 'normal', 'light', 'skip'],
 };
