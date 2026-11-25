@@ -44,7 +44,7 @@ ignored via `.git/info/exclude`). Disable with `BRIDGE_WORKTREE=0`. Manage them 
 
 Monitoring: `agent status` (idle / WORKING + last tool / LIMITED / NO HEARTBEAT). Env: `BRIDGE_ALERT` (seconds, default 1800),
 `BRIDGE_STALL` (no-activity seconds, default 600), `BRIDGE_LIMIT_PAUSE` (default 300). Check the install with `./install.sh --check`.
-`agent disable <worker>` / `agent enable <worker>` (only the admin; also a button in the widget) block a worker: its runner stops, `agent up` skips it and nobody can send it orders until it is enabled again.
+`agent disable <worker>` / `agent enable <worker>` (only the admin; also a button in the widget) block a worker: its runner stops, `agent up` skips it and nobody can send it orders until it is enabled again (`agent enable` also starts it).
 
 The admin has `/dashboard` (a single snapshot, `agent dashboard --once`) and `agent model <worker> <model|default> [effort]` / `agent effort <worker> <level|default>` (only the admin; applies from the worker's next order; the dashboard shows the effort in use).
 The installer wraps each Claude account's status line by default so the dashboard has its numbers (`--no-statusline` skips it).

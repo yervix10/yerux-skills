@@ -2,6 +2,11 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.8.1
+
+- `agent enable <worker>` (and the widget's "Activar agente") now also starts the worker's runner.
+- Windows (`bridge.ps1`): `agent disable` / `agent enable` with the same rules (blocked workers get no orders, `agent up` and `agent all` skip them, `agent status` shows `DISABLED`).
+
 ## 1.8.0
 
 - `agent disable <worker>` / `agent enable <worker>` (admin only): a blocked worker has its runner stopped, `agent up` skips it, and `agent <worker> ...` / `agent all ...` refuse to send it orders until it is enabled again. `agent status` shows `DISABLED`; `agent dashboard --json` adds `disabled` and state `disabled`.

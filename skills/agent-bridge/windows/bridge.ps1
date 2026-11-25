@@ -39,8 +39,9 @@ function Send-Msg($to, $msg) {
   $from = if ($me) { $me } else { 'unknown' }
   if ($to -eq 'all') {
     Ensure-Dir (Join-Path $B 'inbox')
-    foreach ($d in (Get-ChildItem (Join-Path $B 'inbox') -Directory)) { if ($d.Name -ne $from) { Send-Msg $d.Name $msg } }
+    foreach ($d in (Get-ChildItem (Join-Path $B 'inbox') -Directory)) { if ($d.Name -ne $from -and -not (Test-Path (Join-Path $B "disabled\$($d.Name)"))) { Send-Msg $d.Name $msg } }
     return }
+  if (Test-Path (Join-Path $B "disabled\$to")) { Write-Error "$to is disabled (blocked): enable it with 'agent enable $to'"; return }
   $inbox = Join-Path $B "inbox\$to"; Ensure-Dir $inbox
   $stamp = (Get-Date).ToString('yyyyMMddTHHmmss')
   $f = Join-Path $inbox "$stamp.$PID-de-$from.msg"
@@ -136,6 +137,7 @@ function Invoke-Agent($a) {
       $ps = (Get-Process -Id $PID).Path
       foreach ($n in $names) {
         if ($n -eq $me) { continue }
+        if (Test-Path (Join-Path $B "disabled\$n")) { Write-Output "${n}: disabled (agent enable $n to use it)"; continue }
         if (Test-Up $n) { Write-Output "${n}: already up"; continue }
         $p = Start-Process -FilePath $ps -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$self`"", 'runner', '-Name', $n)
         Write-Text (Join-Path $B "runs\$n.pid") ([string]$p.Id); Write-Output "${n}: up (pid $($p.Id))" } }
@@ -145,9 +147,18 @@ function Invoke-Agent($a) {
       foreach ($n in $names) {
         if (Test-Up $n) { Stop-Process -Id ([int](Read-Text (Join-Path $B "runs\$n.pid")).Trim()) -Force; Write-Output "${n}: stopped" } else { Write-Output "${n}: was not up" }
         Remove-Item (Join-Path $B "runs\$n.pid") -Force -ErrorAction SilentlyContinue } }
+    { $_ -in 'disable', 'enable' } {
+      $cmd = $a[0]; $n = $a[1]; $adm = (Read-Text (Join-Path $B 'admin')).Trim()
+      if ($me -ne $adm) { Write-Error "only the admin can $cmd a worker (you are $me)"; return }
+      if (-not $n -or (@(Get-Names) -notcontains $n)) { Write-Error "usage: agent $cmd <worker>   (unknown or missing worker: $n)"; return }
+      if ($n -eq $adm) { Write-Error "the admin cannot be ${cmd}d"; return }
+      Ensure-Dir (Join-Path $B 'disabled'); $flag = Join-Path $B "disabled\$n"
+      if ($cmd -eq 'disable') { Write-Text $flag ''; Invoke-Agent @('down', $n) | Out-Null; Write-Output "${n}: disabled (runner stopped; the admin cannot send it orders until: agent enable $n)" }
+      else { Remove-Item $flag -Force -ErrorAction SilentlyContinue; Invoke-Agent @('up', $n) } }
     'status' {
       $now = Get-Epoch
       foreach ($n in (Get-Names)) {
+        if (Test-Path (Join-Path $B "disabled\$n")) { Write-Output "${n}: DISABLED (blocked; agent enable $n)"; continue }
         if (-not (Test-Up $n)) { Write-Output "${n}: -"; continue }
         $st = Read-State $n; $line = "${n}: UP"
         if (-not $st.status) { $line += '  (no state yet: restart it with agent down/up)' }
@@ -223,7 +234,7 @@ function Invoke-Agent($a) {
       else { [void](Set-One (Join-Path $B "effort\$n") $v 'effort') } }
     'reset'  { Remove-Item (Join-Path $B "sessions\$($a[1])") -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "memory of $($a[1]) cleared" }
     { $_ -in @($null, '', 'help', '-h', '--help') } {
-      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent status | agent dashboard [--once] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
+      Write-Output 'agent ping <target> | agent <target> <message> | agent all <message> | agent list | agent inbox | agent listen | agent up|down <name|all> | agent enable|disable <worker> | agent status | agent dashboard [--once] | agent model <worker> <model|default> [effort] | agent effort <worker> <level|default> | agent logs <name> | agent reset <name> | agent wt list|diff|merge|clean <name> | agent admin [who|release]' }
     default  { Send-Msg $a[0] (Join-Rest $a 1) } } }
 
 # ---- runner: headless worker with memory (resumes its conversation per working directory) ----

@@ -37,7 +37,7 @@ case "$1" in
       [ "$n" != "$adm" ] || { echo "the admin cannot be ${cmd}d" >&2; exit 1; }
       mkdir -p "$R/disabled"
       if [ "$cmd" = disable ]; then : > "$R/disabled/$n"; "$0" down "$n" >/dev/null 2>&1; echo "$n: disabled (runner stopped; the admin cannot send it orders until: agent enable $n)"
-      else rm -f "$R/disabled/$n"; echo "$n: enabled (start it with: agent up $n)"; fi;;
+      else rm -f "$R/disabled/$n"; echo "$n: enabled"; "$0" up "$n"; fi;;
   status) now=$(date +%s); for n in $(awk -F= '{print $2}' "$R/names.conf"); do
       if [ -e "$R/disabled/$n" ]; then echo "$n: DISABLED (blocked; agent enable $n)"; continue; fi
       if [ -f "$R/runs/$n.pid" ] && kill -0 "$(cat "$R/runs/$n.pid")" 2>/dev/null; then

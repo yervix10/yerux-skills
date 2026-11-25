@@ -11,5 +11,5 @@ if "$D/bridge-send" w1 hola 2>/dev/null; then echo "FAIL: send to a disabled age
 "$D/agent" up w1 | grep -q "disabled" || { echo "FAIL: up did not skip"; exit 1; }
 "$D/agent" status | grep -q "w1: DISABLED" || { echo "FAIL: status"; exit 1; }
 "$D/agent" disable adm 2>&1 | grep -q "cannot be" || { echo "FAIL: admin disabled"; exit 1; }
-"$D/agent" enable w1 | grep -q "enabled" && "$D/bridge-send" w1 hola >/dev/null || { echo "FAIL: enable"; exit 1; }
+"$D/agent" enable w1 | grep -q "enabled" && sleep 1 && "$D/agent" down w1 >/dev/null 2>&1 && "$D/bridge-send" w1 hola >/dev/null || { echo "FAIL: enable"; exit 1; }
 echo "disable.test.sh: ok"
