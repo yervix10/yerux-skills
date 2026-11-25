@@ -295,7 +295,7 @@ progress.red { --fill: linear-gradient(90deg, color-mix(in srgb, var(--red) 70%,
 #worker-controls button:disabled, #worker-controls select:disabled { opacity: .5; cursor: not-allowed; }
 #next-order-note { grid-column: 1 / -1; color: var(--muted); font-size: 8px; }
 #control-security-note { grid-column: 1 / -1; color: var(--amber); font-size: 8px; }
-#compact-worker { grid-column: 1 / -1; color: var(--amber) !important; }
+#compact-worker, #toggle-enabled { grid-column: 1 / -1; color: var(--amber) !important; }
 #control-feedback, #admin-controls-note { display: block; margin-top: 6px; color: var(--muted); font-size: 9px; }
 #admin-controls-note { margin: 0; }
 #copy-compact { margin-top: 6px; font-size: 10px; }

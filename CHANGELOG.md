@@ -2,6 +2,10 @@
 
 Notable changes to the whole repository, newest first.
 
+## 1.8.2
+
+- Widget: the block/activate button takes the full width, like "Compactar ahora".
+
 ## 1.8.1
 
 - `agent enable <worker>` (and the widget's "Activar agente") now also starts the worker's runner.
