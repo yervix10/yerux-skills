@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# bridge-account-home <account-dir>: prints the HOME under which Cursor (`cursor-agent`) must run for that account.
-# Cursor keeps its state in $HOME/.cursor (and its sign-in under $HOME/.config), so an account dir ".../.cursor"
-# maps to its parent HOME; a dir that already contains ".cursor" is itself a HOME; any other dir uses the current HOME.
-d="${1%/}"
-case "$d" in */.cursor) printf '%s\n' "${d%/*}";;
-  *) if [ -d "$d/.cursor" ]; then printf '%s\n' "$d"; else printf '%s\n' "$HOME"; fi;; esac

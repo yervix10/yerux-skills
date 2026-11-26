@@ -47,9 +47,10 @@ runs `agent update --yes` and restarts the widget. Nothing is installed automati
 ## Repository layout
 
     skills/               every skill, one folder each, named <topic>-<type>
-      agent-bridge/       the featured package: scripts, runners, desktop widget, Windows port, tests
       …                   the other skills (below)
     lib/ui.sh             terminal UI helpers shared by the installers
+
+The featured package **agent-bridge** (scripts, runners, desktop app, Windows port, tests) is a separate project, `yerux-agent-bridge`. The installers find it in `$AGENT_BRIDGE_DIR` or in `../yerux-agent-bridge`; `get.sh` / `get.ps1` download it for you. Without it, the other skills still install.
     install.sh / .ps1     installers (Linux/macOS/WSL, Windows)
     get.sh / .ps1         one-line bootstrap: downloads the repo and runs the installer
     .github/workflows/    CI: shell and PowerShell syntax, security and feed tests on Linux and macOS
@@ -85,9 +86,9 @@ Create `skills/<topic>-<type>/` following `skills/skill-factory`, then run `./in
 
 ## Tests and CI
 
-    bash skills/agent-bridge/tests/run.sh      # security boundary, activity feed, widget
+    ./install.sh --dry-run --yes --skills none   # installer smoke test (agent-bridge's own tests live in yerux-agent-bridge)
 
-GitHub Actions checks the syntax of every shell and PowerShell script and runs the security and feed tests on Linux and macOS.
+GitHub Actions checks the syntax of the installer scripts and runs the installer dry-run.
 
 ## Changelog
 

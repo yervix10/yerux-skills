@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# bridge-agy-home <agy-account-dir>: prints the HOME under which Google Antigravity (`agy`) must run for that account.
-# agy keeps its state in $HOME/.gemini/antigravity-cli and its global rules in $HOME/.gemini/config, so an account dir
-# ".../.gemini/antigravity-cli" maps to the HOME two levels up; a dir that contains ".gemini" is itself a HOME; else the current HOME.
-d="${1%/}"
-case "$d" in */.gemini/antigravity-cli) printf '%s\n' "${d%/.gemini/antigravity-cli}";;
-  *) if [ -d "$d/.gemini" ]; then printf '%s\n' "$d"; else printf '%s\n' "$HOME"; fi;; esac

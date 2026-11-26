@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # yerux-skills installer (Linux, macOS, WSL): finds Claude Code / Codex / Kiro CLI / Google Antigravity (agy) / Cursor CLI / GitHub Copilot CLI / OpenCode accounts and installs the featured package
-# (agent-bridge) plus any of the other skills. Package-specific logic lives in skills/agent-bridge/package.sh.
+# (agent-bridge) plus any of the other skills. The agent-bridge package lives in the separate yerux-agent-bridge project (bridge/package.sh): found via $AGENT_BRIDGE_DIR or ../yerux-agent-bridge.
 # Windows: use install.ps1.
 # Interactive menu when run from a terminal; --yes accepts everything detected.
 # Usage: ./install.sh [--yes] [--skills a,b|all|none] [--dry-run] [--no-bypass] [--safe] [--no-path] [--no-trust] [--no-statusline] [--check [--fix]] [--name DIR=NAME]... [--claude-dir DIR]... [--codex-dir DIR]... [--kiro-dir DIR]... [--agy-dir DIR]... [--cursor-dir DIR]... [--copilot-dir DIR]... [--opencode-dir DIR]... [--opencode-workers N]
 #        ./install.sh --list | --uninstall [--dry-run]
 set -eo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"; SRC="$ROOT/skills/agent-bridge"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
+ROOT="$(cd "$(dirname "$0")" && pwd)"; BR="$HOME/.claude-bridge"; MANIFEST="$HOME/.yerux-skills/installed.txt"
 DRY=0; FIX=0; MODE=install; OVERS=""; CLAUDE_LIST=""; CODEX_LIST=""; KIRO_LIST=""; AGY_LIST=""; CURSOR_LIST=""; COPILOT_LIST=""; OPENCODE_LIST=""; OC_WORKERS=0; ND_WORKERS=0
-YES=0; PKG_AB=1; SEL_SKILLS=""; REPO_ROOT="$ROOT/skills"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
+AB_FOUND=0; SRC=""
+for c in ${AGENT_BRIDGE_DIR:+"$AGENT_BRIDGE_DIR/bridge" "$AGENT_BRIDGE_DIR"} "$ROOT/../yerux-agent-bridge/bridge"; do
+  [ -f "$c/package.sh" ] && { SRC="$(cd "$c" && pwd)"; AB_FOUND=1; break; }; done
+YES=0; PKG_AB=$AB_FOUND; SEL_SKILLS=""; REPO_ROOT="$ROOT/skills"; OPT_HOOKS=1; OPT_SKILL=1; OPT_BYPASS=1; OPT_PATH=1; OPT_TRUST=1; OPT_STATUSLINE=1; TTY="${AGENT_BRIDGE_TTY:-/dev/tty}"
 [ -f "$ROOT/lib/ui.sh" ] && . "$ROOT/lib/ui.sh" || { ui_banner() { :; }; ui_h() { echo "$1"; }; ui_run() { local l="$1"; shift; "$@" && echo "  ok $l"; }; ui_box() { shift; printf '%s\n' "$@"; }; ui_info() { echo "$1"; }; ui_warn() { echo "$1"; }; ui_account_row() { echo "  $1) [$2] $3 $4 $5"; }; S_ARROW=">"; CYN=""; RST=""; DIM=""; BOLD=""; GRN=""; GRY=""; }
 say() { echo "$@"; }
 tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#$HOME}";; *) printf '%s' "$1";; esac; }
 die() { echo "error: $*" >&2; exit 1; }
 
-. "$SRC/package.sh"
+if [ "$AB_FOUND" = 1 ]; then . "$SRC/package.sh"; else
+  # agent-bridge project not found: the other skills still install; asking for agent-bridge itself is an error
+  ab_missing() { die "agent-bridge not found: clone yerux-agent-bridge next to this repo or set AGENT_BRIDGE_DIR=<path>"; }
+  for f in ab_install_claude ab_install_codex ab_install_kiro ab_install_agy ab_install_cursor ab_install_copilot ab_install_opencode ab_next_steps do_scripts do_path; do eval "$f() { ab_missing; }"; done
+  for f in ab_un_claude ab_un_codex ab_un_kiro ab_un_agy ab_un_cursor ab_un_copilot ab_un_opencode ab_un_app; do eval "$f() { return 0; }"; done
+  agy_cfg() { local d="${1%/}" h; case "$d" in */.gemini/antigravity-cli) h="${d%/.gemini/antigravity-cli}";; *) if [ -d "$d/.gemini" ]; then h="$d"; else h="$HOME"; fi;; esac; printf '%s/.gemini/config' "$h"; }
+fi
 
 # ---------- arguments ----------
 while [ $# -gt 0 ]; do case "$1" in
@@ -316,7 +325,7 @@ $OPENCODE_LIST
 EOF2
   acc_refresh
   ACC_N=$MS_N; ACC_ONS=("${MS_ON[@]}")
-  PK_ON=(); PK_L=("agent-bridge"); PK_S=("Claude Code + Codex + Kiro + Antigravity + Cursor + Copilot + OpenCode sessions that talk to each other"); PK_ON[0]=1
+  PK_ON=(); PK_L=("agent-bridge"); PK_S=("Claude Code + Codex + Kiro + Antigravity + Cursor + Copilot + OpenCode sessions that talk to each other"); PK_ON[0]=$AB_FOUND; [ "$AB_FOUND" = 1 ] || PK_S[0]="not found: clone yerux-agent-bridge next to this repo or set AGENT_BRIDGE_DIR"
   i=0; while [ $i -lt ${#SK_NAMES[@]} ]; do PK_L[$((i+1))]="${SK_NAMES[$i]}"; PK_S[$((i+1))]="${SK_DESC[$i]}"; PK_ON[$((i+1))]=0; i=$((i+1)); done
   OPT_ON=(1 1 1 1)
   info_wait() { local k; ui_cursor_off; while :; do IFS= read -rsn1 -u 3 k || k=""; case "$k" in "") ui_cursor_on; return 0;; b|B) ui_cursor_on; MS_BACK=1; return 0;; e|E) if [ "${MS_EDITABLE:-0}" = 1 ]; then ui_cursor_on; MS_EDIT=1; return 0; fi;; esac; done; }
@@ -477,7 +486,10 @@ un_copilot() { say "uninstalling Copilot: $1"; ab_un_copilot "$1"; remove_skills
 un_opencode() { say "uninstalling OpenCode: $1"; ab_un_opencode "$1"; remove_skills "$1"; }
 un_agy() { say "uninstalling Antigravity: $1"; ab_un_agy "$1"; remove_skills "$(agy_cfg "$1")"; }
 if [ "$MODE" = uninstall ]; then each "$CLAUDE_LIST" un_claude; each "$CODEX_LIST" un_codex; each "$KIRO_LIST" un_kiro; each "$AGY_LIST" un_agy; each "$CURSOR_LIST" un_cursor; each "$COPILOT_LIST" un_copilot; each "$OPENCODE_LIST" un_opencode
+  [ "$PKG_AB" = 1 ] && [ "$DRY" != 1 ] && ab_un_app
   say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; exit 0; fi
+
+[ "$PKG_AB" != 1 ] || [ "$AB_FOUND" = 1 ] || ab_missing
 
 # ---------- install ----------
 in_claude() { [ "$PKG_AB" = 1 ] && ab_install_claude "$1"; install_skills "$1"; return 0; }

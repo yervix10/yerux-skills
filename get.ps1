@@ -1,7 +1,8 @@
-# yerux-skills bootstrap (Windows): installs agent-bridge (featured) and any of the other skills.
+# yerux-skills bootstrap (Windows): installs the skills and, from the separate yerux-agent-bridge project, agent-bridge (featured).
 #   powershell -c "irm https://raw.githubusercontent.com/yervix10/yerux-skills/main/get.ps1 | iex"
 # Env: $env:AGENT_BRIDGE_REF = tag|branch|commit (default main) · $env:AGENT_BRIDGE_REPO = owner/repo
 #      $env:AGENT_BRIDGE_HOME = install dir · $env:AGENT_BRIDGE_ZIP = local archive (offline/testing)
+#      $env:AGENT_BRIDGE_APP_REPO = owner/repo (default yervix10/yerux-agent-bridge) · $env:AGENT_BRIDGE_APP_REF (default main) · $env:AGENT_BRIDGE_DIR = existing checkout (nothing is downloaded)
 # Installer options: set $env:AGENT_BRIDGE_ARGS = '-Yes' (or '-Uninstall', '-List', '-DryRun') before running.
 $ErrorActionPreference = 'Stop'
 $repo = if ($env:AGENT_BRIDGE_REPO) { $env:AGENT_BRIDGE_REPO } else { 'yervix10/yerux-skills' }
@@ -15,7 +16,7 @@ try {
   else { Write-Host "  Downloading $repo@$ref ..." -ForegroundColor Cyan; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$repo/zip/$ref" -OutFile $zip }
   Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'x') -Force
-  $src = Get-ChildItem (Join-Path $tmp 'x') -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'install.ps1')) -and (Test-Path (Join-Path $_.FullName 'skills\agent-bridge\package.ps1')) } | ForEach-Object { $_.FullName } | Select-Object -First 1
+  $src = Get-ChildItem (Join-Path $tmp 'x') -Directory | Where-Object { (Test-Path (Join-Path $_.FullName 'install.ps1')) } | ForEach-Object { $_.FullName } | Select-Object -First 1
   if (-not $src) { throw 'installer files not found in the archive' }
   $dest = Join-Path $app 'app'
   # An antivirus or a running process can hold files of an older copy: retry, and if it still fails update in place instead of aborting half-way.
@@ -35,6 +36,21 @@ try {
     if ($busy.Count) { Write-Host "  ! $($busy.Count) file(s) in use were not updated (the old copy stays): $(($busy | Select-Object -First 5) -join ', ')" -ForegroundColor Yellow }
   } else { Copy-Item $src $dest -Recurse -Force }
   Write-Host "  Files ready in $dest (ref: $ref)" -ForegroundColor Green
+  # agent-bridge lives in its own project: download it next to the installer unless an existing checkout is given
+  if (-not $env:AGENT_BRIDGE_DIR) {
+    $appRepo = if ($env:AGENT_BRIDGE_APP_REPO) { $env:AGENT_BRIDGE_APP_REPO } else { 'yervix10/yerux-agent-bridge' }
+    $appRef = if ($env:AGENT_BRIDGE_APP_REF) { $env:AGENT_BRIDGE_APP_REF } else { 'main' }
+    try {
+      $azip = Join-Path $tmp 'bridge.zip'
+      Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$appRepo/zip/$appRef" -OutFile $azip
+      Expand-Archive -Path $azip -DestinationPath (Join-Path $tmp 'y') -Force
+      $asrc = Get-ChildItem (Join-Path $tmp 'y') -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bridge\package.ps1') } | Select-Object -First 1
+      if (-not $asrc) { throw 'bridge\package.ps1 not found in the archive' }
+      $adest = Join-Path $app 'yerux-agent-bridge'
+      if (Test-Path $adest) { Remove-Item $adest -Recurse -Force -ErrorAction SilentlyContinue }
+      Copy-Item $asrc.FullName $adest -Recurse -Force
+    } catch { Write-Host "  ! could not install $appRepo@$appRef ($($_.Exception.Message)); installing the skills only (set AGENT_BRIDGE_DIR to use a local checkout)" -ForegroundColor Yellow }
+  }
 } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 $extra = @(); if ($env:AGENT_BRIDGE_ARGS) { $extra = @($env:AGENT_BRIDGE_ARGS -split '\s+' | Where-Object { $_ }) }   # @() keeps a single argument an array (a lone string cannot be splatted)
 # Run the installer in its own PowerShell with a process-scoped Bypass: Windows client editions ship with scripts disabled (Restricted),

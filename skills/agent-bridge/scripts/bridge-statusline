@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# Status line wrapper for Claude Code: saves the JSON Claude passes in ($B/usage/<name>.json, read by `agent dashboard`)
-# and then runs the account's original status line command, so the bar looks exactly as before.
-B="${BRIDGE_DIR:-$HOME/.claude-bridge}"; n="${BRIDGE_NAME:-}"; in="$(cat)"
-if [ -n "$n" ]; then mkdir -p "$B/usage"; printf '%s' "$in" > "$B/usage/$n.json.tmp" 2>/dev/null && mv "$B/usage/$n.json.tmp" "$B/usage/$n.json"; fi
-orig="$(cat "$B/statusline/$n.orig" 2>/dev/null)"
-[ -n "$orig" ] && printf '%s' "$in" | sh -c "$orig"

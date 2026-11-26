@@ -1,5 +1,5 @@
 # yerux-skills installer (Windows): finds every Claude Code / Codex account and installs the featured package
-# (agent-bridge) plus any of the other skills. Package-specific logic lives in skills\agent-bridge\package.ps1.
+# (agent-bridge) plus any of the other skills. The agent-bridge package lives in the separate yerux-agent-bridge project (bridge\package.ps1): found via $env:AGENT_BRIDGE_DIR or ..\yerux-agent-bridge.
 # Interactive menu in a console; -Yes accepts everything detected.
 # Usage: .\install.ps1 [-Yes] [-Skills a,b|all|none] [-DryRun] [-NoBypass] [-Safe] [-NoPath] [-NoTrust] [-Check] [-ClaudeDir DIR[,DIR]] [-CodexDir DIR[,DIR]] [-Name "DIR=NAME"]
 #        .\install.ps1 -List | -Uninstall [-DryRun]
@@ -8,7 +8,7 @@ param([switch]$DryRun, [switch]$Uninstall, [switch]$List, [switch]$Check, [switc
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { throw 'This is the Windows installer. On Linux/macOS/WSL run ./install.sh' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path; $Src = Join-Path $Root 'skills\agent-bridge'; $RepoRoot = Join-Path $Root 'skills'
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path; $RepoRoot = Join-Path $Root 'skills'
 $UserHome = $env:USERPROFILE
 $BR = Join-Path $UserHome '.claude-bridge'; $Bin = Join-Path $BR 'bin'; $Manifest = Join-Path $UserHome '.yerux-skills\installed.txt'
 # package: defined after the basic helpers below
@@ -16,7 +16,20 @@ function Say($m) { Write-Host $m }
 function Ensure-Dir($p) { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null } }
 function Read-Text($p) { if (Test-Path $p) { [IO.File]::ReadAllText($p, $utf8) } else { '' } }
 function Write-Text($p, $t) { [IO.File]::WriteAllText($p, $t, $utf8) }
-. (Join-Path $Src 'package.ps1')
+# agent-bridge package: separate project (yerux-agent-bridge). Without it the other skills still install.
+$Src = $null
+foreach ($c in @($(if ($env:AGENT_BRIDGE_DIR) { Join-Path $env:AGENT_BRIDGE_DIR 'bridge'; $env:AGENT_BRIDGE_DIR }), (Join-Path $Root '..\yerux-agent-bridge\bridge'))) {
+  if ($c -and (Test-Path (Join-Path $c 'package.ps1'))) { $Src = (Resolve-Path $c).Path; break } }
+$AbFound = [bool]$Src
+if ($AbFound) { . (Join-Path $Src 'package.ps1') } else {
+  function Ab-Missing { throw 'agent-bridge not found: clone yerux-agent-bridge next to this repo or set $env:AGENT_BRIDGE_DIR' }
+  foreach ($f in 'Ab-Install-Claude', 'Ab-Install-Codex', 'Ab-Install-Kiro', 'Ab-Install-Agy', 'Ab-Install-Cursor', 'Ab-Install-Copilot', 'Ab-Install-OpenCode', 'Ab-Install-Global') { Set-Item "function:$f" { Ab-Missing } }
+  foreach ($f in 'Ab-Uninstall-Claude', 'Ab-Uninstall-Codex', 'Ab-Uninstall-Kiro', 'Ab-Uninstall-Agy', 'Ab-Uninstall-Cursor', 'Ab-Uninstall-Copilot', 'Ab-Uninstall-OpenCode', 'Ab-Uninstall-App') { Set-Item "function:$f" { } }
+  function Ab-Next-Steps { return @() }
+  function Is-Bridge($entry) { return $false }
+  function For-Windows($t) { return $t }
+  function Cursor-Agent-Clash { return $false }
+  function Agy-Cfg($d) { $x = $d.TrimEnd('\', '/'); if ($x -match '^(.*)[\\/]\.gemini[\\/]antigravity-cli$') { $h = $Matches[1] } elseif (Test-Path (Join-Path $x '.gemini')) { $h = $x } else { $h = $UserHome }; return (Join-Path $h '.gemini\config') } }
 
 
 # ---------- UI (colors, banner, progress) ----------
@@ -161,6 +174,7 @@ if ($Uninstall) {
   foreach ($d in $Cursor) { Say "uninstalling Cursor: $d"; if ($DryRun) { continue }; Ab-Uninstall-Cursor $d; Remove-Skills $d }
   foreach ($d in $Copilot) { Say "uninstalling Copilot: $d"; if ($DryRun) { continue }; Ab-Uninstall-Copilot $d; Remove-Skills $d }
   foreach ($d in $OpenCode) { Say "uninstalling OpenCode: $d"; if ($DryRun) { continue }; Ab-Uninstall-OpenCode $d; Remove-Skills $d }
+  if (-not $DryRun) { Ab-Uninstall-App }
   Say "done. agent-bridge and the extra skills this installer added were removed. The mailbox $BR (messages, names.conf) is kept."; return }
 
 
@@ -213,7 +227,7 @@ foreach ($d in (Get-ChildItem $RepoRoot -Directory | Sort-Object Name)) {
   for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^description:\s*(.*)$') { $desc = $Matches[1]; if ($desc -match '^[>|]?$' -and ($i + 1) -lt $lines.Count) { $desc = $lines[$i + 1].Trim() }; break } }
   if ($desc.Length -gt 64) { $desc = $desc.Substring(0, 64) }
   $SkList += [pscustomobject]@{ Name = $d.Name; Desc = $desc; Path = $d.FullName } }
-$PkgAb = $true; $SelSkills = @()
+$PkgAb = $AbFound; $SelSkills = @()
 if ($Skills -eq 'all') { $SelSkills = @($SkList | ForEach-Object { $_.Name }) } elseif ($Skills -and $Skills -ne 'none') { $SelSkills = @($Skills -split '[,\s]+' | Where-Object { $_ }) }
 
 # ---------- interactive menu (arrows + space) ----------
@@ -275,7 +289,7 @@ if (-not $Yes -and -not $DryRun -and $hasConsole -and [Environment]::UserInterac
   $acc = @(); foreach ($d in $Claude) { $acc += [pscustomobject]@{ Kind = 'claude'; Dir = $d } }; foreach ($d in $Codex) { $acc += [pscustomobject]@{ Kind = 'codex'; Dir = $d } }; foreach ($d in $Kiro) { $acc += [pscustomobject]@{ Kind = 'kiro'; Dir = $d } }; foreach ($d in $Agy) { $acc += [pscustomobject]@{ Kind = 'antigravity'; Dir = $d } }; foreach ($d in $Cursor) { $acc += [pscustomobject]@{ Kind = 'cursor'; Dir = $d } }; foreach ($d in $Copilot) { $acc += [pscustomobject]@{ Kind = 'copilot'; Dir = $d } }; foreach ($d in $OpenCode) { $acc += [pscustomobject]@{ Kind = 'opencode'; Dir = $d } }
   $pk = New-Object System.Collections.ArrayList
   [void]$pk.Add([pscustomobject]@{ Label = 'all'; Sub = 'select every package'; On = $false; Feat = $false })
-  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = 'Claude Code + Codex + Kiro + Antigravity + Cursor + Copilot + OpenCode sessions that talk to each other'; On = $true; Feat = $true })
+  [void]$pk.Add([pscustomobject]@{ Label = 'agent-bridge'; Sub = $(if ($AbFound) { 'Claude Code + Codex + Kiro + Antigravity + Cursor + Copilot + OpenCode sessions that talk to each other' } else { 'not found: clone yerux-agent-bridge next to this repo or set $env:AGENT_BRIDGE_DIR' }); On = $AbFound; Feat = $true })
   foreach ($x in $SkList) { [void]$pk.Add([pscustomobject]@{ Label = $x.Name; Sub = $x.Desc; On = $false; Feat = $false }) }
   $step = 1
   while ($true) {
@@ -307,6 +321,7 @@ if (-not $Yes -and -not $DryRun -and $hasConsole -and [Environment]::UserInterac
 
 # ---------- install ----------
 Ui-H 'Installing'
+if ($PkgAb -and -not $AbFound) { Ab-Missing }
 $script:Steps = $(if ($PkgAb) { 1 } else { 0 }) + $Claude.Count + $Codex.Count + $Kiro.Count + $Agy.Count + $Cursor.Count + $Copilot.Count + $OpenCode.Count
 function Install-Skills($d) {
   foreach ($n in $SelSkills) {

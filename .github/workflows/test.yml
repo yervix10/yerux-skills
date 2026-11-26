@@ -5,40 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Syntax of every shell script
-        run: |
-          for f in install.sh get.sh lib/ui.sh skills/agent-bridge/package.sh skills/agent-bridge/scripts/*; do
-            [ "$f" = skills/agent-bridge/scripts/bridge-feed ] && continue
-            case "$f" in *.js) node --check "$f";; *) case "$(head -n 1 "$f")" in *python3*) python3 -m py_compile "$f";; *) bash -n "$f";; esac;; esac
-          done
-          node --check skills/agent-bridge/scripts/bridge-feed
-      - name: Security and feed tests
-        run: |
-          bash skills/agent-bridge/tests/bridge-security.test.sh
-          bash skills/agent-bridge/tests/agent-update.test.sh
-          bash skills/agent-bridge/tests/classify.test.sh
-          bash skills/agent-bridge/tests/symlink-path.test.sh
-          bash skills/agent-bridge/tests/update-etag.test.sh
-          bash skills/agent-bridge/tests/auth-persist.test.sh
-          bash skills/agent-bridge/tests/config-keep.test.sh
-          bash skills/agent-bridge/tests/mentions.test.sh
-          node --test skills/agent-bridge/widget/test/feed.test.cjs
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: brew install jq coreutils bash
-      - run: echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
-      - run: |
-          bash skills/agent-bridge/tests/bridge-security.test.sh
-          bash skills/agent-bridge/tests/agent-update.test.sh
-          bash skills/agent-bridge/tests/classify.test.sh
-          bash skills/agent-bridge/tests/symlink-path.test.sh
-          bash skills/agent-bridge/tests/update-etag.test.sh
-          bash skills/agent-bridge/tests/auth-persist.test.sh
-          bash skills/agent-bridge/tests/config-keep.test.sh
-          bash skills/agent-bridge/tests/mentions.test.sh
-          node --test skills/agent-bridge/widget/test/feed.test.cjs
+      - name: Syntax of the installer scripts
+        run: for f in install.sh get.sh lib/ui.sh; do bash -n "$f"; done
+      - name: Installer works without the agent-bridge project
+        run: ./install.sh --dry-run --yes --skills none
   windows-syntax:
     runs-on: windows-latest
     steps:

@@ -1,6 +1,0 @@
-{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"1. Primera observación completa.\n"}}}}
-{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"tool_call","toolCall":{"name":"fs_read","title":"Read file","rawInput":{"path":"docs/guide.md"}}}}}
-{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"..."}}}}
-{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-redacted","status":"completed","content":"contenido anonimizado"}}}
-{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"2. Segunda observación.\n3. Tercera observación."}}}}
-{"type":"runFinished","data":{"status":"success","finalText":"1. Primera observación completa.\n2. Segunda observación.\n3. Tercera observación."}}

@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# bridge-provider <name-or-config-dir>: resolve provider from explicit marker, then config directory.
-value="${1:-}"
-if [ -d "$value" ]; then dir="$value"; else dir="$(awk -F= -v n="$value" '$2==n{print $1; exit}' "${BRIDGE_DIR:-$HOME/.claude-bridge}/names.conf" 2>/dev/null)"; fi
-[ -n "$dir" ] || exit 1
-if [ -f "$dir/provider" ]; then IFS= read -r kind < "$dir/provider"; else case "$(basename "$dir")" in .claude*) kind=claude;; .codex*) kind=codex;; .kiro*) kind=kiro;; antigravity*|.antigravity*|agy*|.agy*) kind=antigravity;; .cursor*|cursor*) kind=cursor;; .opencode*|opencode*) kind=opencode;; .nodecode*|nodecode*) kind=nodecode;; .copilot*|copilot*) kind=copilot;; *) case "$(basename "$dir")" in claude*) kind=claude;; codex*) kind=codex;; kiro*) kind=kiro;; *) exit 1;; esac;; esac; fi
-case "$kind" in claude|codex|kiro|antigravity|cursor|opencode|copilot|nodecode) printf '%s\n' "$kind";; *) exit 1;; esac
